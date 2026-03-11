@@ -2,6 +2,8 @@
 
 import pytest
 from renderer import VideoRendererProtocol, RenderRequest, JobStatus
+from renderer import RemotionRenderer
+import config
 
 
 # ---------------------------------------------------------------------------
@@ -231,3 +233,47 @@ class TestJobStatusValidation:
         """JobStatus.progress defaults to 0.0."""
         status = JobStatus(state="accepted")
         assert status.progress == 0.0
+
+
+# ---------------------------------------------------------------------------
+# VideoRendererProtocol compliance (structural typing)
+# ---------------------------------------------------------------------------
+
+class TestProtocolCompliance:
+
+    def test_remotion_implements_protocol(self):
+        """RemotionRenderer satisfies VideoRendererProtocol via isinstance()."""
+        renderer = RemotionRenderer()
+        assert isinstance(renderer, VideoRendererProtocol)
+
+    def test_protocol_swappability(self):
+        """A DummyRenderer with matching signatures satisfies VideoRendererProtocol.
+
+        This proves structural typing works — swapping the render engine
+        requires zero code changes in calling code.
+        """
+
+        class DummyRenderer:
+            async def render(self, request: RenderRequest) -> str:
+                return "dummy-job-id"
+
+            async def get_status(self, job_id: str) -> JobStatus:
+                return JobStatus(state="completed")
+
+            async def health_check(self) -> bool:
+                return True
+
+            async def download_file(self, job_id: str, dest_path: str) -> None:
+                pass
+
+        assert isinstance(DummyRenderer(), VideoRendererProtocol)
+
+    def test_remotion_default_base_url(self):
+        """RemotionRenderer defaults base_url to config.REMOTION_SERVICE_URL."""
+        renderer = RemotionRenderer()
+        assert renderer.base_url == config.REMOTION_SERVICE_URL
+
+    def test_remotion_custom_base_url(self):
+        """RemotionRenderer accepts a custom base_url."""
+        renderer = RemotionRenderer("http://custom:9999")
+        assert renderer.base_url == "http://custom:9999"
