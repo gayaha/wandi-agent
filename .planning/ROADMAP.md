@@ -78,7 +78,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — TextSegment data model, Zod SegmentSchema, auto-conversion from legacy fields, and updated RemotionRenderer payload
+- [x] 04-01-PLAN.md — TextSegment data model, Zod SegmentSchema, auto-conversion from legacy fields, and updated RemotionRenderer payload
 - [ ] 04-02-PLAN.md — SegmentOverlay rendering component with per-role styling, ReelTemplate Sequence integration, and pipeline integration tests
 
 ## Progress
@@ -91,4 +91,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | 1. Remotion Service Foundation | 3/3 | Complete | 2026-03-11 |
 | 2. Python Integration Layer | 3/3 | Complete | 2026-03-11 |
 | 3. Brand Template System | 2/2 | Complete | 2026-03-11 |
-| 4. Multi-Segment Text | 0/2 | Not started | - |
+| 4. Multi-Segment Text | 1/2 | In Progress | - |

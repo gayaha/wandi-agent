@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-03-11T03:24:24.140Z"
-last_activity: 2026-03-11 — Completed Plan 03-02 (brand-aware TextOverlay/ReelTemplate, hexToRgba/getOverlayBoxStyle/POSITION_MAP helpers, 17 new TS tests + 4 new Python integration tests)
+stopped_at: Completed 04-01-PLAN.md (TextSegment model, SegmentSchema, auto-conversion, renderer payload)
+last_updated: "2026-03-11T05:55:00Z"
+last_activity: 2026-03-11 — Completed Plan 04-01 (TextSegment Pydantic model, Zod SegmentSchema, ReelInputSchema refine, _build_segments auto-conversion, segments payload in RemotionRenderer)
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
-  percent: 75
+  total_plans: 10
+  completed_plans: 9
+  percent: 88
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 
 ## Current Position
 
-Phase: 3 of 4 (Brand Template System) — Complete
-Plan: 2 of 2 in current phase (plan 03-02 complete)
+Phase: 4 of 4 (Multi-Segment Text) — In Progress
+Plan: 1 of 2 in current phase (plan 04-01 complete)
 Status: Executing
-Last activity: 2026-03-11 — Completed Plan 03-02 (brand-aware TextOverlay/ReelTemplate, hexToRgba/getOverlayBoxStyle/POSITION_MAP helpers, 17 new TS tests + 4 new Python integration tests)
+Last activity: 2026-03-11 — Completed Plan 04-01 (TextSegment Pydantic model, Zod SegmentSchema, ReelInputSchema refine, _build_segments auto-conversion, segments payload in RemotionRenderer)
 
-Progress: [########░░] 75%
+Progress: [#########░] 88%
 
 ## Performance Metrics
 
@@ -46,10 +46,11 @@ Progress: [########░░] 75%
 | 1 | 3 | 8m 10s + continuation | ~3m |
 | 2 | 3 | 3m 56s + 4m 47s + 5m 45s | ~4m 49s |
 | 3 | 2 (of 2) | 5m 33s + 3m 17s | ~4m 25s |
+| 4 | 1 (of 2 complete) | 5m 11s | ~5m 11s |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (3m 53s), 01-03 (continuation), 02-01 (3m 56s), 02-02 (4m 47s), 02-03 (5m 45s)
-- Trend: Stable velocity
+- Last 5 plans: 02-02 (4m 47s), 02-03 (5m 45s), 03-01 (5m 33s), 03-02 (3m 17s), 04-01 (5m 11s)
+- Trend: Stable velocity ~4-5m per plan
 
 *Updated after each plan completion*
 
@@ -93,6 +94,11 @@ Recent decisions affecting current work:
 - [03-02]: hexToRgba and getOverlayBoxStyle exported as pure functions — enables unit testing without React rendering context
 - [03-02]: fadeFrames computed from animationSpeedMs/fps — brand can control animation speed per their config
 - [03-02]: POSITION_MAP exported as const object — typed with as const for TS inference, importable by tests
+- [04-01]: TextSegment uses model_validator(mode='after') for end_seconds > start_seconds — cross-field constraint cannot be expressed as a simple Field constraint
+- [04-01]: RenderRequest hook_text/body_text changed to optional with None default — model_validator enforces either/or, existing callers unaffected
+- [04-01]: _build_segments splits duration in half for legacy auto-conversion — equal halves is the simplest deterministic split
+- [04-01]: RemotionRenderer.render() sends segments param when provided, falls back to hookText/bodyText defensively
+- [04-01]: ReelTemplate.tsx uses hookText ?? '' / bodyText ?? '' — Plan 04-02 will add segment-aware rendering; this keeps TS clean meanwhile
 
 ### Pending Todos
 
@@ -105,6 +111,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11T03:24:24.138Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-multi-segment-text/04-CONTEXT.md
+Last session: 2026-03-11T05:55:00Z
+Stopped at: Completed 04-01-PLAN.md (TextSegment model, SegmentSchema, auto-conversion, renderer payload)
+Resume file: .planning/phases/04-multi-segment-text/04-01-SUMMARY.md
