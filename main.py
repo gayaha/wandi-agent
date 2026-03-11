@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ import agent
 import airtable_client as at
 import config
 import ollama_client as ollama
+import supabase_client
 from renderer import get_renderer, RenderRequest, JobStatus
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -45,6 +47,14 @@ async def lifespan(app: FastAPI):
         logger.info("Ollama is reachable")
     else:
         logger.warning("Ollama is NOT reachable — generation will fail")
+
+    # Check Remotion service
+    renderer = get_renderer()
+    if await renderer.health_check():
+        logger.info("Remotion service is reachable")
+    else:
+        logger.warning("Remotion service is NOT reachable - renders will fail")
+
     yield
     logger.info("wandi-agent shutting down...")
 
@@ -284,11 +294,25 @@ async def _run_render(job_id: str, request: RenderRequest):
         tmp_path = f"/tmp/{job_id}-rendered.mp4"
         await renderer.download_file(remotion_job_id, tmp_path)
 
-        # Mark complete — Plan 02-03 will insert Supabase upload and replace tmp_path with CDN URL
+        # Upload to Supabase Storage
+        _render_jobs[job_id]["status"] = "uploading"
+        destination = f"{request.record_id}/{job_id}.mp4"
+        video_url = await supabase_client.upload_video(tmp_path, destination)
+
+        # Save as Airtable attachment
+        await at.update_content_queue_video_attachment(request.record_id, video_url)
+
+        # Clean up temp file
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+        # Mark completed with Supabase public URL (not local path)
         _render_jobs[job_id]["status"] = "completed"
         _render_jobs[job_id]["progress"] = 1.0
-        _render_jobs[job_id]["video_url"] = tmp_path  # Temporary — Plan 02-03 replaces with Supabase URL
-        logger.info(f"Render job {job_id} completed: {tmp_path}")
+        _render_jobs[job_id]["video_url"] = video_url
+        logger.info(f"Render job {job_id} completed: {video_url}")
 
         # Notify callback if provided
         if request.callback_url:

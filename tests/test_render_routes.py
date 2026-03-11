@@ -20,7 +20,14 @@ class TestSubmitRender:
     @pytest.mark.asyncio
     async def test_post_render_returns_202_with_job_id(self, app_client):
         """POST /render with a valid RenderRequest returns 202 and a job_id."""
-        with patch("main.get_renderer") as mock_get_renderer:
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove"):
+
+            mock_upload.return_value = "https://example.supabase.co/test.mp4"
+            mock_attach.return_value = {}
+
             mock_rend = AsyncMock()
             mock_rend.render = AsyncMock(return_value="remotion-job-abc")
             mock_rend.get_status = AsyncMock(
@@ -50,7 +57,14 @@ class TestSubmitRender:
         """POST /render returns a response in under 1 second (non-blocking)."""
         import time
 
-        with patch("main.get_renderer") as mock_get_renderer:
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove"):
+
+            mock_upload.return_value = "https://example.supabase.co/test.mp4"
+            mock_attach.return_value = {}
+
             mock_rend = AsyncMock()
             mock_rend.render = AsyncMock(return_value="remotion-job-abc")
             mock_rend.get_status = AsyncMock(
@@ -97,7 +111,14 @@ class TestGetRenderStatus:
     @pytest.mark.asyncio
     async def test_get_render_status_returns_job_state(self, app_client):
         """GET /render-status/{job_id} returns the current job state dict."""
-        with patch("main.get_renderer") as mock_get_renderer:
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove"):
+
+            mock_upload.return_value = "https://example.supabase.co/test.mp4"
+            mock_attach.return_value = {}
+
             mock_rend = AsyncMock()
             mock_rend.render = AsyncMock(return_value="remotion-job-abc")
             mock_rend.get_status = AsyncMock(
@@ -140,7 +161,14 @@ class TestBackgroundTaskLifecycle:
     @pytest.mark.asyncio
     async def test_background_task_transitions_to_completed(self, app_client):
         """Background task updates job state to 'completed' after successful render."""
-        with patch("main.get_renderer") as mock_get_renderer:
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove"):
+
+            mock_upload.return_value = "https://example.supabase.co/lifecycle.mp4"
+            mock_attach.return_value = {}
+
             mock_rend = AsyncMock()
             mock_rend.render = AsyncMock(return_value="remotion-job-lifecycle")
             mock_rend.get_status = AsyncMock(
@@ -225,7 +253,14 @@ class TestBackgroundTaskLifecycle:
     @pytest.mark.asyncio
     async def test_background_task_marks_failed_when_renderer_returns_failed(self, app_client):
         """Background task marks job 'failed' when renderer returns failed state."""
-        with patch("main.get_renderer") as mock_get_renderer:
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove"):
+
+            mock_upload.return_value = "https://example.supabase.co/fail.mp4"
+            mock_attach.return_value = {}
+
             mock_rend = AsyncMock()
             mock_rend.render = AsyncMock(return_value="remotion-job-fail")
             mock_rend.get_status = AsyncMock(
@@ -259,9 +294,14 @@ class TestBackgroundTaskLifecycle:
     async def test_background_task_notifies_callback_url_on_completion(self, app_client):
         """Background task POSTs to callback_url on successful completion."""
         with patch("main.get_renderer") as mock_get_renderer, \
-             patch("main._send_render_callback") as mock_callback:
+             patch("main._send_render_callback") as mock_callback, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove") as mock_remove:
 
             mock_callback.return_value = None
+            mock_upload.return_value = "https://example.supabase.co/rendered.mp4"
+            mock_attach.return_value = {}
 
             mock_rend = AsyncMock()
             mock_rend.render = AsyncMock(return_value="remotion-job-callback")
@@ -291,3 +331,141 @@ class TestBackgroundTaskLifecycle:
         assert mock_callback.called
         call_args = mock_callback.call_args
         assert call_args[0][0] == "https://example.com/callback"
+
+
+# ---------------------------------------------------------------------------
+# Full pipeline: render -> download -> upload -> attach -> cleanup
+# ---------------------------------------------------------------------------
+
+class TestFullPipeline:
+
+    @pytest.mark.asyncio
+    async def test_full_pipeline_uploads_and_attaches(self, app_client):
+        """Full pipeline: upload_video called with correct path, attach called with record_id and URL."""
+        supabase_url = "https://example.supabase.co/storage/v1/object/public/rendered-videos/recABC123/job001.mp4"
+
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove") as mock_remove:
+
+            mock_upload.return_value = supabase_url
+            mock_attach.return_value = {}
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-pipeline")
+            mock_rend.get_status = AsyncMock(
+                return_value=JobStatus(state="completed", progress=1.0)
+            )
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "hook_text": "hook",
+                    "body_text": "body",
+                    "record_id": "recABC123",
+                },
+            )
+            assert resp.status_code == 202
+            job_id = resp.json()["job_id"]
+
+            # Allow the background task to complete
+            await asyncio.sleep(0.1)
+
+        # upload_video should be called with tmp_path and "{record_id}/{job_id}.mp4"
+        mock_upload.assert_called_once()
+        upload_args = mock_upload.call_args
+        assert upload_args.args[0] == f"/tmp/{job_id}-rendered.mp4"
+        assert upload_args.args[1] == f"recABC123/{job_id}.mp4"
+
+        # Airtable attachment should be called with record_id and Supabase URL
+        mock_attach.assert_called_once_with("recABC123", supabase_url)
+
+        # Final job state has the Supabase URL, not local path
+        status_resp = await app_client.get(f"/render-status/{job_id}")
+        data = status_resp.json()
+        assert data["status"] == "completed"
+        assert data["video_url"] == supabase_url
+
+    @pytest.mark.asyncio
+    async def test_pipeline_cleans_up_temp_file(self, app_client):
+        """os.remove is called on tmp_path after successful upload."""
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove") as mock_remove:
+
+            mock_upload.return_value = "https://example.supabase.co/test.mp4"
+            mock_attach.return_value = {}
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-cleanup")
+            mock_rend.get_status = AsyncMock(
+                return_value=JobStatus(state="completed", progress=1.0)
+            )
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "hook_text": "hook",
+                    "body_text": "body",
+                    "record_id": "recCLEAN",
+                },
+            )
+            assert resp.status_code == 202
+            job_id = resp.json()["job_id"]
+
+            await asyncio.sleep(0.1)
+
+        # os.remove should be called with the temp path
+        mock_remove.assert_called_once_with(f"/tmp/{job_id}-rendered.mp4")
+
+    @pytest.mark.asyncio
+    async def test_pipeline_status_transitions(self, app_client):
+        """Job status goes through accepted -> completed (pipeline uploads + attaches)."""
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove") as mock_remove:
+
+            mock_upload.return_value = "https://example.supabase.co/transitions.mp4"
+            mock_attach.return_value = {}
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-transitions")
+            mock_rend.get_status = AsyncMock(
+                return_value=JobStatus(state="completed", progress=1.0)
+            )
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "hook_text": "hook",
+                    "body_text": "body",
+                    "record_id": "recTRANS",
+                },
+            )
+            assert resp.status_code == 202
+            job_id = resp.json()["job_id"]
+
+            # Initial state is accepted
+            status_resp = await app_client.get(f"/render-status/{job_id}")
+            assert status_resp.json()["status"] == "accepted"
+
+            # Let the background task complete
+            await asyncio.sleep(0.1)
+
+        # Final state is completed with Supabase URL
+        status_resp = await app_client.get(f"/render-status/{job_id}")
+        data = status_resp.json()
+        assert data["status"] == "completed"
+        assert data["video_url"] == "https://example.supabase.co/transitions.mp4"
