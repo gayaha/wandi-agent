@@ -18,8 +18,18 @@ import airtable_client as at
 import config
 import ollama_client as ollama
 import supabase_client
+import video_picker
 from renderer import get_renderer, RenderRequest, JobStatus, BrandConfig
 from renderer.brand import resolve_brand_for_render
+
+
+# ── Constants ────────────────────────────────────────────────────────────────
+
+_AWARENESS_STAGE_MAP = {
+    "Unaware": 1,
+    "Problem-Aware": 3,
+    "Solution-Aware": 5,
+}
 
 
 def _build_segments(request: RenderRequest) -> list[dict[str, Any]]:
@@ -141,6 +151,10 @@ class GenerateAsyncRequest(BaseModel):
     user_id: str = Field(..., description="Supabase user UUID")
     connection_id: str = Field(default="", description="Supabase meta_connection UUID")
     webhook_secret: str = Field(default="", description="Shared secret for callback auth")
+    folders: dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of folder_id → display name for video selection",
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -191,6 +205,7 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
             client_id=request.client_id,
             batch_type=request.batch_type,
             quantity=request.quantity,
+            folders=request.folders,
         )
 
         # Map reels to content_projects format
@@ -213,8 +228,96 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
                 "client_airtable_id": request.client_id,
                 "client_name": result.get("client_name", ""),
                 "batch_id": batch_id,
+                "folder_id": reel.get("folder_id"),
+                "source_video_url": None,
+                "rendered_video_url": None,
+                "render_error": None,
                 "status": "draft",
             })
+
+        # ── Video picking + rendering ────────────────────────────────
+        if request.folders:
+            reels_data = result.get("reels", [])
+            video_urls = video_picker.pick_videos_for_reels(
+                request.user_id, request.folders, reels_data
+            )
+
+            # Assign source_video_url to projects
+            for i, url in enumerate(video_urls):
+                if i < len(projects):
+                    projects[i]["source_video_url"] = url
+
+            # Render each reel that has a source video and record_id
+            sem = asyncio.Semaphore(5)
+
+            async def _render_one(idx: int, project: dict) -> None:
+                source_url = project.get("source_video_url")
+                record_id = project.get("airtable_record_id")
+                if not source_url or not record_id:
+                    return
+
+                async with sem:
+                    try:
+                        render_req = RenderRequest(
+                            source_video_url=source_url,
+                            hook_text=project.get("video_text", ""),
+                            body_text=project.get("verbal_script", ""),
+                            record_id=record_id,
+                            client_id=request.client_id,
+                            awareness_stage=_AWARENESS_STAGE_MAP.get(
+                                project.get("awareness_stage", ""), None
+                            ),
+                        )
+
+                        renderer = get_renderer()
+                        brand_config = at.extract_brand_config(client_record)
+                        resolved_brand = resolve_brand_for_render(
+                            brand_config, render_req.awareness_stage
+                        )
+                        segments = _build_segments(render_req)
+
+                        remotion_job_id = await renderer.render(
+                            render_req, resolved_brand=resolved_brand, segments=segments
+                        )
+
+                        # Poll until done
+                        for attempt in range(120):
+                            status = await renderer.get_status(remotion_job_id)
+                            if status.state == "completed":
+                                break
+                            elif status.state == "failed":
+                                raise RuntimeError(f"Render failed: {status.error}")
+                            wait = min(2 + attempt, 5)
+                            await asyncio.sleep(wait)
+                        else:
+                            raise RuntimeError("Render timed out")
+
+                        # Download + upload
+                        tmp_path = f"/tmp/{record_id}-{remotion_job_id}.mp4"
+                        await renderer.download_file(remotion_job_id, tmp_path)
+
+                        destination = f"{record_id}/{remotion_job_id}.mp4"
+                        video_url = await supabase_client.upload_video(tmp_path, destination)
+
+                        await at.update_content_queue_video_attachment(record_id, video_url)
+
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+
+                        project["rendered_video_url"] = video_url
+                        project["status"] = "rendered"
+                        logger.info(f"[async] Rendered reel {idx}: {video_url}")
+
+                    except Exception as e:
+                        logger.error(f"[async] Render failed for reel {idx}: {e}")
+                        project["render_error"] = str(e)
+                        project["status"] = "render_failed"
+
+            await asyncio.gather(
+                *[_render_one(i, p) for i, p in enumerate(projects)]
+            )
 
         logger.info(
             f"[async] Generation complete: {len(projects)} reels, "
@@ -474,6 +577,17 @@ async def generate_async(request: GenerateAsyncRequest):
         "status": "accepted",
         "message": "Content generation started. Results will be sent to callback URL.",
     }
+
+
+class PickVideoRequest(BaseModel):
+    user_id: str = Field(..., description="Supabase user UUID")
+
+
+@app.post("/pick-video")
+async def pick_video(request: PickVideoRequest):
+    """Pick a random source video from the user's raw-media library."""
+    url = supabase_client.pick_random_source_video(request.user_id)
+    return {"video_url": url}
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
