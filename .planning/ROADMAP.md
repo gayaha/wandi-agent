@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Remotion Service Foundation** - Running Node.js Docker service that renders verified Hebrew + English text on Supabase video
 - [x] **Phase 2: Python Integration Layer** - FastAPI endpoint with VideoRendererProtocol, async job pattern, and Airtable output storage
-- [ ] **Phase 3: Brand Template System** - Per-client brand templates with font, color, position, and animation parameters
+- [x] **Phase 3: Brand Template System** - Per-client brand templates with font, color, position, and animation parameters
 - [ ] **Phase 4: Multi-Segment Text** - Multiple independent text segments with per-segment timing (hook, body, CTA)
 
 ## Phase Details
@@ -65,7 +65,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md — BrandConfig model, SDMF stage modifiers, multi-font loading, Airtable extraction, Zod schema extension, and pipeline wiring
-- [ ] 03-02-PLAN.md — Brand-aware TextOverlay and ReelTemplate rendering components with integration tests
+- [x] 03-02-PLAN.md — Brand-aware TextOverlay and ReelTemplate rendering components with integration tests
 
 ### Phase 4: Multi-Segment Text
 **Goal**: A single render request can include multiple independent text segments — hook, body, CTA — each appearing and disappearing at different times in the video with their own animation settings
@@ -90,5 +90,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 |-------|----------------|--------|-----------|
 | 1. Remotion Service Foundation | 3/3 | Complete | 2026-03-11 |
 | 2. Python Integration Layer | 3/3 | Complete | 2026-03-11 |
-| 3. Brand Template System | 1/2 | In progress | - |
+| 3. Brand Template System | 2/2 | Complete | 2026-03-11 |
 | 4. Multi-Segment Text | 0/2 | Not started | - |

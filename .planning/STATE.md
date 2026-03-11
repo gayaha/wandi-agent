@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed Plan 03-01
-last_updated: "2026-03-11T05:06:00Z"
-last_activity: 2026-03-11 — Completed Plan 03-01 (BrandConfig, STAGE_MODIFIERS, multi-font loading, Zod BrandConfigSchema, extract_brand_config, pipeline wiring, 30 new Python tests + 15 new TS tests)
+stopped_at: Completed Plan 03-02
+last_updated: "2026-03-11T05:11:46Z"
+last_activity: 2026-03-11 — Completed Plan 03-02 (brand-aware TextOverlay/ReelTemplate, hexToRgba/getOverlayBoxStyle/POSITION_MAP helpers, 17 new TS tests + 4 new Python integration tests)
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 8
-  completed_plans: 7
-  percent: 63
+  completed_plans: 8
+  percent: 75
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 
 ## Current Position
 
-Phase: 3 of 4 (Brand Template System) — In Progress
-Plan: 1 of 2 in current phase (plan 03-01 complete)
+Phase: 3 of 4 (Brand Template System) — Complete
+Plan: 2 of 2 in current phase (plan 03-02 complete)
 Status: Executing
-Last activity: 2026-03-11 — Completed Plan 03-01 (BrandConfig, STAGE_MODIFIERS, multi-font loading, Zod BrandConfigSchema, extract_brand_config, pipeline wiring, 30 new Python tests + 15 new TS tests)
+Last activity: 2026-03-11 — Completed Plan 03-02 (brand-aware TextOverlay/ReelTemplate, hexToRgba/getOverlayBoxStyle/POSITION_MAP helpers, 17 new TS tests + 4 new Python integration tests)
 
-Progress: [#######░░░] 63%
+Progress: [########░░] 75%
 
 ## Performance Metrics
 
@@ -45,7 +45,7 @@ Progress: [#######░░░] 63%
 |-------|-------|-------|----------|
 | 1 | 3 | 8m 10s + continuation | ~3m |
 | 2 | 3 | 3m 56s + 4m 47s + 5m 45s | ~4m 49s |
-| 3 | 1 (of 2) | 5m 33s | ~5m 33s |
+| 3 | 2 (of 2) | 5m 33s + 3m 17s | ~4m 25s |
 
 **Recent Trend:**
 - Last 5 plans: 01-02 (3m 53s), 01-03 (continuation), 02-01 (3m 56s), 02-02 (4m 47s), 02-03 (5m 45s)
@@ -90,6 +90,9 @@ Recent decisions affecting current work:
 - [03-01]: STAGE_MODIFIERS use relative scale (brand.hook_font_size * scale) not absolute sizes — consistent visual hierarchy across all brand base sizes
 - [03-01]: extract_brand_config() wraps entire BrandConfig(**raw) in try/except — any invalid combination falls back to all-defaults with warning log
 - [03-01]: fontFamily backward-compat export kept in fonts.ts — existing TextOverlay continues working until Plan 02 updates it to getFontFamily()
+- [03-02]: hexToRgba and getOverlayBoxStyle exported as pure functions — enables unit testing without React rendering context
+- [03-02]: fadeFrames computed from animationSpeedMs/fps — brand can control animation speed per their config
+- [03-02]: POSITION_MAP exported as const object — typed with as const for TS inference, importable by tests
 
 ### Pending Todos
 
@@ -102,6 +105,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11T05:06:00Z
-Stopped at: Completed 03-01-PLAN.md
-Resume file: .planning/phases/03-brand-template-system/03-02-PLAN.md
+Last session: 2026-03-11T05:11:46Z
+Stopped at: Completed 03-02-PLAN.md
+Resume file: .planning/phases/04-multi-segment-text/04-01-PLAN.md
