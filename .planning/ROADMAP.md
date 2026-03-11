@@ -12,7 +12,7 @@ This milestone adds a standalone video renderer module to the Wandi platform. Th
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Remotion Service Foundation** - Running Node.js Docker service that renders verified Hebrew + English text on Supabase video
+- [x] **Phase 1: Remotion Service Foundation** - Running Node.js Docker service that renders verified Hebrew + English text on Supabase video
 - [ ] **Phase 2: Python Integration Layer** - FastAPI endpoint with VideoRendererProtocol, async job pattern, and Airtable output storage
 - [ ] **Phase 3: Brand Template System** - Per-client brand templates with font, color, position, and animation parameters
 - [ ] **Phase 4: Multi-Segment Text** - Multiple independent text segments with per-segment timing (hook, body, CTA)
@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md — Bootstrap Remotion render server with Express 5, async job queue, Zod schema, Dockerfile, and vitest test infrastructure
 - [x] 01-02-PLAN.md — Build ReelTemplate composition with Hebrew font loading, RTL text overlays, safe zone positioning, and fade/slide animations
-- [ ] 01-03-PLAN.md — Smoke test render with Hebrew + English text, validate MP4 format, visual verification of RTL and font
+- [x] 01-03-PLAN.md — Smoke test render with Hebrew + English text, validate MP4 format, visual verification of RTL and font
 
 ### Phase 2: Python Integration Layer
 **Goal**: A Python `renderer/` module with `VideoRendererProtocol`, `RemotionRenderer` implementation, and a FastAPI endpoint — so Python code can submit a render job, poll to completion, and receive a URL saved as an Airtable attachment, without any Remotion-specific coupling in business logic
@@ -88,7 +88,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Remotion Service Foundation | 2/3 | In progress | - |
+| 1. Remotion Service Foundation | 3/3 | Complete | 2026-03-11 |
 | 2. Python Integration Layer | 0/3 | Not started | - |
 | 3. Brand Template System | 0/2 | Not started | - |
 | 4. Multi-Segment Text | 0/2 | Not started | - |

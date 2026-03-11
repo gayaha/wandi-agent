@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-03-11T00:54:35Z"
-last_activity: 2026-03-11 — Completed Plan 01-02 (ReelTemplate composition with Hebrew RTL and animations)
+stopped_at: Completed 01-03-PLAN.md (Phase 1 complete)
+last_updated: "2026-03-11T01:12:00Z"
+last_activity: 2026-03-11 — Completed Plan 01-03 (Smoke render + visual verification, Phase 1 complete)
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 10
-  completed_plans: 2
-  percent: 20
+  completed_plans: 3
+  percent: 30
 ---
 
 # Project State
@@ -21,32 +21,32 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-11)
 
 **Core value:** Business owners get publish-ready Instagram Reels with branded Hebrew text overlays — no manual video editing
-**Current focus:** Phase 1 — Remotion Service Foundation
+**Current focus:** Phase 2 — Python Integration Layer
 
 ## Current Position
 
-Phase: 1 of 4 (Remotion Service Foundation)
-Plan: 2 of 3 in current phase
+Phase: 2 of 4 (Python Integration Layer)
+Plan: 0 of 3 in current phase
 Status: Executing
-Last activity: 2026-03-11 — Completed Plan 01-02 (ReelTemplate composition with Hebrew RTL and animations)
+Last activity: 2026-03-11 — Completed Plan 01-03 (Smoke render + visual verification, Phase 1 complete)
 
-Progress: [##░░░░░░░░] 20%
+Progress: [###░░░░░░░] 30%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
+- Total plans completed: 3
 - Average duration: 4m 5s
-- Total execution time: 8m 10s
+- Total execution time: 8m 10s + continuation
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1 | 2 | 8m 10s | 4m 5s |
+| 1 | 3 | 8m 10s + continuation | ~3m |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4m 17s), 01-02 (3m 53s)
+- Last 5 plans: 01-01 (4m 17s), 01-02 (3m 53s), 01-03 (continuation)
 - Trend: Stable velocity
 
 *Updated after each plan completion*
@@ -69,6 +69,9 @@ Recent decisions affecting current work:
 - [01-02]: Exported getTextContainerStyle() helper for testable RTL assertions without React rendering context
 - [01-02]: Added sourceVideoLocalPath as optional field in ReelInputSchema — render-queue injects after pre-download
 - [01-02]: Exit slide animation uses interpolate (not reverse spring) for predictable frame-based control
+- [01-03]: Added registerRoot() in remotion/index.ts — Remotion bundler requires explicit root registration
+- [01-03]: Webpack extensionAlias maps .js imports to .ts/.tsx for NodeNext module resolution compatibility
+- [01-03]: Copy test video into bundle directory for OffthreadVideo URL-based resolution
 
 ### Pending Todos
 
@@ -81,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11T00:54:35Z
-Stopped at: Completed 01-02-PLAN.md
-Resume file: .planning/phases/01-remotion-service-foundation/01-02-SUMMARY.md
+Last session: 2026-03-11T01:12:00Z
+Stopped at: Completed 01-03-PLAN.md (Phase 1 complete)
+Resume file: .planning/phases/01-remotion-service-foundation/01-03-SUMMARY.md
