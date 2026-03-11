@@ -31,6 +31,7 @@ class RemotionRenderer:
         self,
         request: RenderRequest,
         resolved_brand: dict[str, Any] | None = None,
+        segments: list[dict[str, Any]] | None = None,
     ) -> str:
         """Submit a render job to the Remotion service, return job_id.
 
@@ -40,17 +41,28 @@ class RemotionRenderer:
                 resolve_brand_for_render(). When provided, added to payload
                 as 'brandConfig' for Zod validation in Remotion service.
                 When absent, Remotion fills all brand defaults from schema.
+            segments: Optional list of camelCase segment dicts from
+                _build_segments(). When provided, sent as 'segments' payload
+                instead of hookText/bodyText. When None (defensive fallback),
+                falls back to legacy hookText/bodyText.
         """
         import httpx
 
         payload: dict[str, Any] = {
             "sourceVideoUrl": request.source_video_url,
-            "hookText": request.hook_text,
-            "bodyText": request.body_text,
             "textDirection": request.text_direction,
             "animationStyle": request.animation_style,
             "durationInSeconds": request.duration_in_seconds,
         }
+
+        if segments is not None:
+            # New path: send segments array; Zod validates via SegmentSchema
+            payload["segments"] = segments
+        else:
+            # Defensive fallback: send legacy hookText/bodyText
+            payload["hookText"] = request.hook_text
+            payload["bodyText"] = request.body_text
+
         if request.callback_url is not None:
             payload["callbackUrl"] = request.callback_url
         if resolved_brand is not None:

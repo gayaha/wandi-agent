@@ -46,8 +46,8 @@ export const ReelTemplate: React.FC<ReelInput> = ({
         }}
       >
         <TextOverlay
-          hookText={hookText}
-          bodyText={bodyText}
+          hookText={hookText ?? ""}
+          bodyText={bodyText ?? ""}
           animationStyle={animationStyle}
           textDirection={textDirection}
           primaryColor={brandConfig?.primaryColor}

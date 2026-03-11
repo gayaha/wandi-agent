@@ -29,18 +29,47 @@ export const BrandConfigSchema = z.object({
 
 export type BrandConfig = z.infer<typeof BrandConfigSchema>;
 
-export const ReelInputSchema = z.object({
-  sourceVideoUrl: z.string(),
-  hookText: z.string(),
-  bodyText: z.string(),
-  textDirection: z.enum(["rtl", "ltr"]).default("rtl"),
+/**
+ * SegmentSchema — a single timed text segment for multi-segment rendering.
+ *
+ * Each segment has a role (hook/body/cta), timing (startSeconds/endSeconds),
+ * and optional per-segment animation style (defaults to "fade").
+ */
+export const SegmentSchema = z.object({
+  text: z.string(),
+  startSeconds: z.number().min(0),
+  endSeconds: z.number().positive(),
   animationStyle: z.enum(["fade", "slide"]).default("fade"),
-  durationInSeconds: z.number().min(3).max(90).default(15),
-  // Injected at render time by the render queue after pre-downloading the video.
-  // Not part of the HTTP request schema — added via spread in render-queue.ts.
-  sourceVideoLocalPath: z.string().optional(),
-  // Optional per-client brand configuration. When absent, Zod fills all defaults.
-  brandConfig: BrandConfigSchema.optional(),
+  role: z.enum(["hook", "body", "cta"]),
 });
+
+export type Segment = z.infer<typeof SegmentSchema>;
+
+export const ReelInputSchema = z
+  .object({
+    sourceVideoUrl: z.string(),
+    // hookText and bodyText are now optional — replaced by segments in new API
+    hookText: z.string().optional(),
+    bodyText: z.string().optional(),
+    textDirection: z.enum(["rtl", "ltr"]).default("rtl"),
+    animationStyle: z.enum(["fade", "slide"]).default("fade"),
+    durationInSeconds: z.number().min(3).max(90).default(15),
+    // Injected at render time by the render queue after pre-downloading the video.
+    // Not part of the HTTP request schema — added via spread in render-queue.ts.
+    sourceVideoLocalPath: z.string().optional(),
+    // Optional per-client brand configuration. When absent, Zod fills all defaults.
+    brandConfig: BrandConfigSchema.optional(),
+    // Optional segments array (1-5). When provided, replaces hookText/bodyText.
+    segments: z.array(SegmentSchema).min(1).max(5).optional(),
+  })
+  .refine(
+    (data) =>
+      data.segments !== undefined ||
+      (data.hookText !== undefined && data.bodyText !== undefined),
+    {
+      message:
+        "Provide either 'segments' (array of segment objects) or both 'hookText' and 'bodyText'",
+    },
+  );
 
 export type ReelInput = z.infer<typeof ReelInputSchema>;

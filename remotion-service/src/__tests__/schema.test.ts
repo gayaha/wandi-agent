@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ReelInputSchema } from "../../remotion/schemas.js";
+import { ReelInputSchema, SegmentSchema } from "../../remotion/schemas.js";
 
 describe("ReelInputSchema", () => {
   const validInput = {
@@ -148,6 +148,129 @@ describe("ReelInputSchema", () => {
         brandConfig: { fontFamily: font },
       });
       expect(result.success).toBe(true);
+    }
+  });
+});
+
+// ── SegmentSchema and segments in ReelInput ────────────────────────────────
+
+describe("SegmentSchema and segments in ReelInput", () => {
+  const validSegment = {
+    text: "שלום",
+    startSeconds: 0,
+    endSeconds: 5,
+    role: "hook",
+  };
+
+  const validSegmentOnlyInput = {
+    sourceVideoUrl: "https://example.com/video.mp4",
+    segments: [validSegment],
+  };
+
+  const validLegacyInput = {
+    sourceVideoUrl: "https://example.com/video.mp4",
+    hookText: "שלום",
+    bodyText: "גוף הטקסט",
+  };
+
+  // ── SegmentSchema ────────────────────────────────────────────────────────
+
+  it("SegmentSchema parses a valid segment with all fields", () => {
+    const result = SegmentSchema.safeParse({
+      text: "hello",
+      startSeconds: 0,
+      endSeconds: 5,
+      animationStyle: "slide",
+      role: "body",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.text).toBe("hello");
+      expect(result.data.startSeconds).toBe(0);
+      expect(result.data.endSeconds).toBe(5);
+      expect(result.data.animationStyle).toBe("slide");
+      expect(result.data.role).toBe("body");
+    }
+  });
+
+  it("SegmentSchema applies default animationStyle of 'fade'", () => {
+    const result = SegmentSchema.safeParse(validSegment);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.animationStyle).toBe("fade");
+    }
+  });
+
+  it("SegmentSchema accepts role 'hook'", () => {
+    const result = SegmentSchema.safeParse({ ...validSegment, role: "hook" });
+    expect(result.success).toBe(true);
+  });
+
+  it("SegmentSchema accepts role 'body'", () => {
+    const result = SegmentSchema.safeParse({ ...validSegment, role: "body" });
+    expect(result.success).toBe(true);
+  });
+
+  it("SegmentSchema accepts role 'cta'", () => {
+    const result = SegmentSchema.safeParse({ ...validSegment, role: "cta" });
+    expect(result.success).toBe(true);
+  });
+
+  it("SegmentSchema rejects invalid role", () => {
+    const result = SegmentSchema.safeParse({ ...validSegment, role: "invalid" });
+    expect(result.success).toBe(false);
+  });
+
+  it("SegmentSchema rejects negative startSeconds", () => {
+    const result = SegmentSchema.safeParse({ ...validSegment, startSeconds: -1 });
+    expect(result.success).toBe(false);
+  });
+
+  it("SegmentSchema rejects zero or negative endSeconds", () => {
+    const result = SegmentSchema.safeParse({ ...validSegment, endSeconds: 0 });
+    expect(result.success).toBe(false);
+  });
+
+  // ── ReelInputSchema with segments ───────────────────────────────────────
+
+  it("ReelInputSchema accepts segments-only payload (no hookText/bodyText)", () => {
+    const result = ReelInputSchema.safeParse(validSegmentOnlyInput);
+    expect(result.success).toBe(true);
+  });
+
+  it("ReelInputSchema accepts legacy hookText+bodyText payload (no segments)", () => {
+    const result = ReelInputSchema.safeParse(validLegacyInput);
+    expect(result.success).toBe(true);
+  });
+
+  it("ReelInputSchema rejects payload with neither segments nor hookText/bodyText", () => {
+    const result = ReelInputSchema.safeParse({
+      sourceVideoUrl: "https://example.com/video.mp4",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("ReelInputSchema rejects payload with only hookText (missing bodyText)", () => {
+    const result = ReelInputSchema.safeParse({
+      sourceVideoUrl: "https://example.com/video.mp4",
+      hookText: "only hook",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("ReelInputSchema accepts segments with all segment fields", () => {
+    const result = ReelInputSchema.safeParse({
+      ...validSegmentOnlyInput,
+      segments: [
+        { text: "hook text", startSeconds: 0, endSeconds: 5, role: "hook", animationStyle: "slide" },
+        { text: "body text", startSeconds: 5, endSeconds: 15, role: "body" },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.segments).toHaveLength(2);
+      expect(result.data.segments?.[0].animationStyle).toBe("slide");
+      expect(result.data.segments?.[1].animationStyle).toBe("fade"); // default
     }
   });
 });

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
-import { ReelInputSchema } from "../remotion/schemas.js";
+import { ReelInputSchema, type ReelInput } from "../remotion/schemas.js";
 
 export type JobState = {
   state: "queued" | "in-progress" | "completed" | "failed";
@@ -80,14 +80,7 @@ export function makeRenderQueue(bundlePath: string) {
 
   async function runRender(
     jobId: string,
-    validatedProps: {
-      sourceVideoUrl: string;
-      hookText: string;
-      bodyText: string;
-      textDirection: "rtl" | "ltr";
-      animationStyle: "fade" | "slide";
-      durationInSeconds: number;
-    }
+    validatedProps: ReelInput
   ): Promise<void> {
     const videoLocalPath = path.join("/tmp", `${jobId}-source.mp4`);
     const outputDir = "/tmp/renders";

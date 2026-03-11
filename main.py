@@ -21,6 +21,46 @@ import supabase_client
 from renderer import get_renderer, RenderRequest, JobStatus, BrandConfig
 from renderer.brand import resolve_brand_for_render
 
+
+def _build_segments(request: RenderRequest) -> list[dict[str, Any]]:
+    """Convert a RenderRequest to a segments list for the Remotion service.
+
+    When the request already has segments, returns them as camelCase dicts.
+    When using legacy hook_text/body_text, auto-converts to 2 segments
+    by splitting the duration in half.
+    """
+    if request.segments is not None:
+        return [
+            {
+                "text": s.text,
+                "startSeconds": s.start_seconds,
+                "endSeconds": s.end_seconds,
+                "animationStyle": s.animation_style,
+                "role": s.role,
+            }
+            for s in request.segments
+        ]
+
+    # Legacy mode: auto-convert hook_text/body_text to 2 equal-duration segments
+    duration = request.duration_in_seconds
+    mid = duration / 2
+    return [
+        {
+            "text": request.hook_text or "",
+            "startSeconds": 0.0,
+            "endSeconds": mid,
+            "animationStyle": request.animation_style,
+            "role": "hook",
+        },
+        {
+            "text": request.body_text or "",
+            "startSeconds": mid,
+            "endSeconds": float(duration),
+            "animationStyle": request.animation_style,
+            "role": "body",
+        },
+    ]
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -278,8 +318,11 @@ async def _run_render(job_id: str, request: RenderRequest):
             brand_config = BrandConfig()
         resolved_brand = resolve_brand_for_render(brand_config, request.awareness_stage)
 
+        # Build segments for Remotion payload (from request.segments or auto-converted)
+        segments = _build_segments(request)
+
         # Submit to Remotion service
-        remotion_job_id = await renderer.render(request, resolved_brand=resolved_brand)
+        remotion_job_id = await renderer.render(request, resolved_brand=resolved_brand, segments=segments)
         _render_jobs[job_id]["status"] = "rendering"
         _render_jobs[job_id]["remotion_job_id"] = remotion_job_id
 
