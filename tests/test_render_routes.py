@@ -645,3 +645,172 @@ class TestBrandConfig:
         data = resp.json()
         assert "job_id" in data
         assert data["status"] == "accepted"
+
+
+# ---------------------------------------------------------------------------
+# Segment pipeline: POST /render with segments array
+# ---------------------------------------------------------------------------
+
+class TestSegments:
+
+    @pytest.mark.asyncio
+    async def test_render_with_segments_returns_202(self, app_client):
+        """POST /render with a segments array returns 202."""
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove"):
+
+            mock_upload.return_value = "https://example.supabase.co/segments.mp4"
+            mock_attach.return_value = {}
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-segments")
+            mock_rend.get_status = AsyncMock(
+                return_value=JobStatus(state="completed", progress=1.0)
+            )
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "record_id": "recSEG123",
+                    "segments": [
+                        {"text": "Hook text", "start_seconds": 0, "end_seconds": 3, "role": "hook", "animation_style": "fade"},
+                        {"text": "Body text", "start_seconds": 3, "end_seconds": 8, "role": "body", "animation_style": "fade"},
+                        {"text": "Call to action!", "start_seconds": 8, "end_seconds": 12, "role": "cta", "animation_style": "fade"},
+                    ],
+                },
+            )
+
+        assert resp.status_code == 202
+        data = resp.json()
+        assert "job_id" in data
+        assert data["status"] == "accepted"
+
+    @pytest.mark.asyncio
+    async def test_render_with_segments_sends_segments_to_renderer(self, app_client):
+        """POST /render with segments calls renderer.render() with correct camelCase segments."""
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove"):
+
+            mock_upload.return_value = "https://example.supabase.co/segments.mp4"
+            mock_attach.return_value = {}
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-segs-check")
+            mock_rend.get_status = AsyncMock(
+                return_value=JobStatus(state="completed", progress=1.0)
+            )
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "record_id": "recSEG456",
+                    "segments": [
+                        {"text": "Hook text", "start_seconds": 0, "end_seconds": 3, "role": "hook", "animation_style": "fade"},
+                        {"text": "Body text", "start_seconds": 3, "end_seconds": 8, "role": "body", "animation_style": "fade"},
+                        {"text": "CTA text", "start_seconds": 8, "end_seconds": 12, "role": "cta", "animation_style": "slide"},
+                    ],
+                },
+            )
+            assert resp.status_code == 202
+
+            # Allow background task to run
+            await asyncio.sleep(0.1)
+
+        # Verify renderer.render was called with a segments kwarg containing 3 camelCase dicts
+        mock_rend.render.assert_called_once()
+        call_kwargs = mock_rend.render.call_args.kwargs
+        segments = call_kwargs.get("segments")
+        assert segments is not None
+        assert len(segments) == 3
+
+        # Verify camelCase keys
+        hook_seg = segments[0]
+        assert hook_seg["text"] == "Hook text"
+        assert hook_seg["startSeconds"] == 0
+        assert hook_seg["endSeconds"] == 3
+        assert hook_seg["role"] == "hook"
+        assert hook_seg["animationStyle"] == "fade"
+
+        cta_seg = segments[2]
+        assert cta_seg["role"] == "cta"
+        assert cta_seg["animationStyle"] == "slide"
+
+    @pytest.mark.asyncio
+    async def test_render_legacy_backward_compat(self, app_client):
+        """POST /render with legacy hook_text/body_text auto-converts to segments."""
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock) as mock_upload, \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock) as mock_attach, \
+             patch("main.os.remove"):
+
+            mock_upload.return_value = "https://example.supabase.co/legacy.mp4"
+            mock_attach.return_value = {}
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-legacy")
+            mock_rend.get_status = AsyncMock(
+                return_value=JobStatus(state="completed", progress=1.0)
+            )
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "hook_text": "Legacy hook text",
+                    "body_text": "Legacy body content",
+                    "record_id": "recLEGACY",
+                },
+            )
+            assert resp.status_code == 202
+
+            # Allow background task to run
+            await asyncio.sleep(0.1)
+
+        # Verify renderer.render was called with segments kwarg containing 2 auto-converted segments
+        mock_rend.render.assert_called_once()
+        call_kwargs = mock_rend.render.call_args.kwargs
+        segments = call_kwargs.get("segments")
+        assert segments is not None
+        assert len(segments) == 2
+
+        # First segment should be the hook
+        assert segments[0]["role"] == "hook"
+        assert segments[0]["text"] == "Legacy hook text"
+        assert segments[0]["startSeconds"] == 0.0
+
+        # Second segment should be the body
+        assert segments[1]["role"] == "body"
+        assert segments[1]["text"] == "Legacy body content"
+
+        # Segments should cover the full duration (default 15s)
+        assert segments[0]["endSeconds"] == segments[1]["startSeconds"]
+        assert segments[1]["endSeconds"] == 15.0
+
+    @pytest.mark.asyncio
+    async def test_render_segments_validation_overlap_rejected(self, app_client):
+        """POST /render with overlapping segments returns 422 validation error."""
+        resp = await app_client.post(
+            "/render",
+            json={
+                "source_video_url": "https://example.com/source.mp4",
+                "record_id": "recOVERLAP",
+                "segments": [
+                    {"text": "First", "start_seconds": 0, "end_seconds": 5, "role": "hook"},
+                    # Overlaps: starts at 4, before first ends at 5
+                    {"text": "Overlapping", "start_seconds": 4, "end_seconds": 10, "role": "body"},
+                ],
+            },
+        )
+        assert resp.status_code == 422
