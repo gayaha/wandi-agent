@@ -51,7 +51,7 @@ Plans:
 Plans:
 - [x] 02-01-PLAN.md — Define VideoRendererProtocol, RenderRequest/JobStatus models, RemotionRenderer skeleton, and pytest test infrastructure
 - [x] 02-02-PLAN.md — Implement async job pattern with FastAPI routes (POST /render, GET /render-status), background polling task, and Remotion file-download endpoint
-- [ ] 02-03-PLAN.md — Wire Supabase Storage upload for rendered videos and Airtable attachment PATCH into the render pipeline
+- [x] 02-03-PLAN.md — Wire Supabase Storage upload for rendered videos and Airtable attachment PATCH into the render pipeline
 
 ### Phase 3: Brand Template System
 **Goal**: The render pipeline accepts per-client brand configuration — primary/secondary colors, font family, text positioning, and awareness-stage styling — and produces visually distinct, branded output for each client
@@ -89,6 +89,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Remotion Service Foundation | 3/3 | Complete | 2026-03-11 |
-| 2. Python Integration Layer | 2/3 | In progress | - |
+| 2. Python Integration Layer | 3/3 | Complete | 2026-03-11 |
 | 3. Brand Template System | 0/2 | Not started | - |
 | 4. Multi-Segment Text | 0/2 | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed Plan 02-02 (async render routes + background task + Remotion file endpoint)
-last_updated: "2026-03-11T02:06:41Z"
-last_activity: 2026-03-11 — Completed Plan 02-02 (POST /render, GET /render-status, _run_render background task, GET /renders/:id/file, 17 new tests)
+stopped_at: Completed Plan 02-03 (Supabase upload + Airtable attachment + full render pipeline)
+last_updated: "2026-03-11T02:16:05Z"
+last_activity: 2026-03-11 — Completed Plan 02-03 (supabase_client.upload_video, update_content_queue_video_attachment, full pipeline in main.py, 11 new tests)
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
-  percent: 36
+  completed_phases: 2
+  total_plans: 6
+  completed_plans: 6
+  percent: 55
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 
 ## Current Position
 
-Phase: 2 of 4 (Python Integration Layer)
-Plan: 2 of 3 in current phase (Plans 02-01 and 02-02 complete)
+Phase: 2 of 4 (Python Integration Layer) — COMPLETE
+Plan: 3 of 3 in current phase (all plans complete)
 Status: Executing
-Last activity: 2026-03-11 — Completed Plan 02-02 (POST /render, GET /render-status, _run_render background task, GET /renders/:id/file, 17 new tests)
+Last activity: 2026-03-11 — Completed Plan 02-03 (supabase_client.upload_video, update_content_queue_video_attachment, full pipeline in main.py, 11 new tests)
 
-Progress: [#####░░░░░] 45%
+Progress: [######░░░░] 55%
 
 ## Performance Metrics
 
@@ -44,10 +44,10 @@ Progress: [#####░░░░░] 45%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 3 | 8m 10s + continuation | ~3m |
-| 2 (partial) | 2 | 3m 56s + 4m 47s | ~4m 22s |
+| 2 | 3 | 3m 56s + 4m 47s + 5m 45s | ~4m 49s |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4m 17s), 01-02 (3m 53s), 01-03 (continuation), 02-01 (3m 56s), 02-02 (4m 47s)
+- Last 5 plans: 01-02 (3m 53s), 01-03 (continuation), 02-01 (3m 56s), 02-02 (4m 47s), 02-03 (5m 45s)
 - Trend: Stable velocity
 
 *Updated after each plan completion*
@@ -81,6 +81,10 @@ Recent decisions affecting current work:
 - [02-02]: _background_tasks module-level set prevents asyncio garbage-collecting in-flight tasks
 - [02-02]: MAX_POLL_ATTEMPTS=120 with sleep capped at 5s gives 10-minute max render wait
 - [02-02]: _run_render stores tmp_path as video_url — Plan 02-03 replaces with Supabase CDN URL
+- [02-03]: Patch supabase_client.create_client (not supabase.create_client) in tests — module imports create_client directly so patch must be on the module's binding
+- [02-03]: sync supabase-py client acceptable inside asyncio background task — upload IO does not significantly block event loop
+- [02-03]: destination path pattern is {record_id}/{job_id}.mp4 — groups videos by Airtable record in Supabase Storage
+- [02-03]: Remotion health check added to lifespan startup — warns early if service unreachable
 
 ### Pending Todos
 
@@ -93,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11T02:06:41Z
-Stopped at: Completed Plan 02-02 (async render routes + background task + Remotion file endpoint)
-Resume file: .planning/phases/02-python-integration-layer/02-03-PLAN.md
+Last session: 2026-03-11T02:16:05Z
+Stopped at: Completed Plan 02-03 (Supabase upload + Airtable attachment + full render pipeline)
+Resume file: .planning/phases/03-brand-template-system/03-01-PLAN.md
