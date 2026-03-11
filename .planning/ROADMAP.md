@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Bootstrap Remotion render server with Express 5, async job queue, Zod schema, Dockerfile, and vitest test infrastructure
+- [x] 01-01-PLAN.md — Bootstrap Remotion render server with Express 5, async job queue, Zod schema, Dockerfile, and vitest test infrastructure
 - [ ] 01-02-PLAN.md — Build ReelTemplate composition with Hebrew font loading, RTL text overlays, safe zone positioning, and fade/slide animations
 - [ ] 01-03-PLAN.md — Smoke test render with Hebrew + English text, validate MP4 format, visual verification of RTL and font
 
@@ -88,7 +88,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Remotion Service Foundation | 0/3 | Planning complete | - |
+| 1. Remotion Service Foundation | 1/3 | In progress | - |
 | 2. Python Integration Layer | 0/3 | Not started | - |
 | 3. Brand Template System | 0/2 | Not started | - |
 | 4. Multi-Segment Text | 0/2 | Not started | - |
