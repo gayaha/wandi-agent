@@ -10,15 +10,15 @@ Requirements for the video renderer milestone. Each maps to roadmap phases.
 ### Rendering Core
 
 - [ ] **REND-01**: Renderer produces 1080x1920 vertical MP4 with H.264 video, AAC audio at 30fps — Instagram Reels spec
-- [ ] **REND-02**: User can see generated text content overlaid on raw video footage in the rendered output
-- [ ] **REND-03**: Text overlays are positioned within the Instagram safe zone (avoiding top ~250px and bottom ~250px UI overlap)
-- [ ] **REND-04**: Text elements animate on entry and exit (fade-in/out at minimum, slide and spring as options)
+- [x] **REND-02**: User can see generated text content overlaid on raw video footage in the rendered output
+- [x] **REND-03**: Text overlays are positioned within the Instagram safe zone (avoiding top ~250px and bottom ~250px UI overlap)
+- [x] **REND-04**: Text elements animate on entry and exit (fade-in/out at minimum, slide and spring as options)
 
 ### Hebrew / RTL
 
-- [ ] **HEBR-01**: Hebrew text renders right-to-left correctly in video output
+- [x] **HEBR-01**: Hebrew text renders right-to-left correctly in video output
 - [ ] **HEBR-02**: Mixed Hebrew + English text in the same element renders with correct bidirectional ordering (punctuation, numbers, English words positioned correctly)
-- [ ] **HEBR-03**: Renderer loads a Hebrew-capable font (Heebo or Assistant) that covers Latin + Hebrew Unicode blocks
+- [x] **HEBR-03**: Renderer loads a Hebrew-capable font (Heebo or Assistant) that covers Latin + Hebrew Unicode blocks
 
 ### Text Segments
 
@@ -72,12 +72,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | REND-01 | Phase 1 | Pending |
-| REND-02 | Phase 1 | Pending |
-| REND-03 | Phase 1 | Pending |
-| REND-04 | Phase 1 | Pending |
-| HEBR-01 | Phase 1 | Pending |
+| REND-02 | Phase 1 | Complete (01-02) |
+| REND-03 | Phase 1 | Complete (01-02) |
+| REND-04 | Phase 1 | Complete (01-02) |
+| HEBR-01 | Phase 1 | Complete (01-02) |
 | HEBR-02 | Phase 1 | Pending |
-| HEBR-03 | Phase 1 | Pending |
+| HEBR-03 | Phase 1 | Complete (01-02) |
 | SEGM-01 | Phase 4 | Pending |
 | TMPL-01 | Phase 3 | Pending |
 | TMPL-02 | Phase 3 | Pending |

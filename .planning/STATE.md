@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-03-11T00:46:16Z"
-last_activity: 2026-03-11 — Completed Plan 01-01 (Bootstrap Remotion render server)
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-03-11T00:54:35Z"
+last_activity: 2026-03-11 — Completed Plan 01-02 (ReelTemplate composition with Hebrew RTL and animations)
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 10
-  completed_plans: 1
-  percent: 10
+  completed_plans: 2
+  percent: 20
 ---
 
 # Project State
@@ -26,28 +26,28 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 ## Current Position
 
 Phase: 1 of 4 (Remotion Service Foundation)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: Executing
-Last activity: 2026-03-11 — Completed Plan 01-01 (Bootstrap Remotion render server)
+Last activity: 2026-03-11 — Completed Plan 01-02 (ReelTemplate composition with Hebrew RTL and animations)
 
-Progress: [#░░░░░░░░░] 10%
+Progress: [##░░░░░░░░] 20%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 4m 17s
-- Total execution time: 4m 17s
+- Total plans completed: 2
+- Average duration: 4m 5s
+- Total execution time: 8m 10s
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1 | 1 | 4m 17s | 4m 17s |
+| 1 | 2 | 8m 10s | 4m 5s |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4m 17s)
-- Trend: First plan completed
+- Last 5 plans: 01-01 (4m 17s), 01-02 (3m 53s)
+- Trend: Stable velocity
 
 *Updated after each plan completion*
 
@@ -66,6 +66,9 @@ Recent decisions affecting current work:
 - [01-01]: Manual scaffold instead of npx create-video — interactive CLI not automatable; used exact research versions
 - [01-01]: Zod validation at enqueue time, not HTTP handler — failed jobs immediately marked "failed" with validation error
 - [01-01]: Mocked @remotion/bundler and @remotion/renderer in unit tests — Chrome/webpack not needed for queue data structure tests
+- [01-02]: Exported getTextContainerStyle() helper for testable RTL assertions without React rendering context
+- [01-02]: Added sourceVideoLocalPath as optional field in ReelInputSchema — render-queue injects after pre-download
+- [01-02]: Exit slide animation uses interpolate (not reverse spring) for predictable frame-based control
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11T00:46:16Z
-Stopped at: Completed 01-01-PLAN.md
-Resume file: .planning/phases/01-remotion-service-foundation/01-01-SUMMARY.md
+Last session: 2026-03-11T00:54:35Z
+Stopped at: Completed 01-02-PLAN.md
+Resume file: .planning/phases/01-remotion-service-foundation/01-02-SUMMARY.md
