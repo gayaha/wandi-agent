@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-03-11T01:30:36.967Z"
-last_activity: 2026-03-11 — Completed Plan 01-03 (Smoke render + visual verification, Phase 1 complete)
+stopped_at: Completed Plan 02-01 (renderer protocol + models + skeleton)
+last_updated: "2026-03-11T01:58:34Z"
+last_activity: 2026-03-11 — Completed Plan 02-01 (VideoRendererProtocol, RenderRequest/JobStatus models, RemotionRenderer skeleton, pytest infrastructure)
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 30
+  total_plans: 4
+  completed_plans: 4
+  percent: 36
 ---
 
 # Project State
@@ -26,27 +26,28 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 ## Current Position
 
 Phase: 2 of 4 (Python Integration Layer)
-Plan: 0 of 3 in current phase
+Plan: 1 of 3 in current phase (Plan 02-01 complete)
 Status: Executing
-Last activity: 2026-03-11 — Completed Plan 01-03 (Smoke render + visual verification, Phase 1 complete)
+Last activity: 2026-03-11 — Completed Plan 02-01 (VideoRendererProtocol, RenderRequest/JobStatus models, RemotionRenderer skeleton, pytest infrastructure)
 
-Progress: [###░░░░░░░] 30%
+Progress: [####░░░░░░] 36%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 4m 5s
-- Total execution time: 8m 10s + continuation
+- Total plans completed: 4
+- Average duration: ~4m
+- Total execution time: 8m 10s + continuation + 3m 56s
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 3 | 8m 10s + continuation | ~3m |
+| 2 (partial) | 1 | 3m 56s | 3m 56s |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4m 17s), 01-02 (3m 53s), 01-03 (continuation)
+- Last 5 plans: 01-01 (4m 17s), 01-02 (3m 53s), 01-03 (continuation), 02-01 (3m 56s)
 - Trend: Stable velocity
 
 *Updated after each plan completion*
@@ -72,6 +73,10 @@ Recent decisions affecting current work:
 - [01-03]: Added registerRoot() in remotion/index.ts — Remotion bundler requires explicit root registration
 - [01-03]: Webpack extensionAlias maps .js imports to .ts/.tsx for NodeNext module resolution compatibility
 - [01-03]: Copy test video into bundle directory for OffthreadVideo URL-based resolution
+- [02-01]: VideoRendererProtocol uses @runtime_checkable Protocol — isinstance() checks work without inheritance
+- [02-01]: RemotionRenderer uses lazy imports for httpx inside methods — avoids import cost at module load
+- [02-01]: State mapping dict (_STATE_MAP) in remotion.py normalizes Remotion service states to internal states
+- [02-01]: get_renderer() factory in renderer/__init__.py provides clean injection point for testing and future swaps
 
 ### Pending Todos
 
@@ -84,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11T01:30:36.965Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-python-integration-layer/02-CONTEXT.md
+Last session: 2026-03-11T01:58:34Z
+Stopped at: Completed Plan 02-01 (renderer protocol + models + skeleton)
+Resume file: .planning/phases/02-python-integration-layer/02-02-PLAN.md
