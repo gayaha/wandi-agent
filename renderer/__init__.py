@@ -1,6 +1,6 @@
 """Renderer package — protocol, models, and implementations."""
 
-from renderer.models import JobStatus, RenderRequest
+from renderer.models import BrandConfig, JobStatus, RenderRequest
 from renderer.protocol import VideoRendererProtocol
 from renderer.remotion import RemotionRenderer
 
@@ -12,6 +12,7 @@ def get_renderer() -> VideoRendererProtocol:
 
 __all__ = [
     "VideoRendererProtocol",
+    "BrandConfig",
     "RenderRequest",
     "JobStatus",
     "RemotionRenderer",

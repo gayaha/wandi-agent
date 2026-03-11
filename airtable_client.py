@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 import config
+from renderer.models import BrandConfig
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,53 @@ async def save_reels_to_queue(
 ) -> list[dict[str, Any]]:
     """Save generated reels to the Content Queue table."""
     return await _create_records_batch(config.TABLE_CONTENT_QUEUE, reels)
+
+
+def extract_brand_config(client_record: dict[str, Any]) -> BrandConfig:
+    """Extract and validate a BrandConfig from an Airtable client record.
+
+    Maps Airtable field names to BrandConfig snake_case field names.
+    Skips None and empty-string values (treats them as absent).
+    Falls back to BrandConfig() all-defaults on any validation error.
+
+    Args:
+        client_record: Airtable record dict with {"id": ..., "fields": {...}}.
+
+    Returns:
+        BrandConfig populated from Airtable data, or all-defaults on error.
+    """
+    _FIELD_MAP = {
+        "Brand Primary Color": "primary_color",
+        "Brand Secondary Color": "secondary_color",
+        "Brand Font Family": "font_family",
+        "Brand Hook Font Size": "hook_font_size",
+        "Brand Body Font Size": "body_font_size",
+        "Brand Overlay Color": "overlay_color",
+        "Brand Overlay Opacity": "overlay_opacity",
+        "Brand Border Radius": "border_radius",
+        "Brand Text Position": "text_position",
+        "Brand Text Align": "text_align",
+    }
+
+    fields = client_record.get("fields", {})
+    raw: dict[str, Any] = {}
+
+    for airtable_field, model_field in _FIELD_MAP.items():
+        value = fields.get(airtable_field)
+        # Skip None and empty strings — treat as absent (use default)
+        if value is None or value == "":
+            continue
+        raw[model_field] = value
+
+    try:
+        return BrandConfig(**raw)
+    except Exception as e:
+        record_id = client_record.get("id", "unknown")
+        logger.warning(
+            f"Failed to extract BrandConfig for client {record_id}: {e}. "
+            "Using all defaults."
+        )
+        return BrandConfig()
 
 
 async def update_content_queue_video_attachment(record_id: str, video_url: str) -> dict[str, Any]:
