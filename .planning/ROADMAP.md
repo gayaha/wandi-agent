@@ -29,12 +29,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Hebrew text in the rendered video displays right-to-left correctly, and embedded English words within Hebrew sentences appear in correct bidirectional order (verified by visual inspection of actual MP4 output, not Studio preview)
   4. Text overlays appear within the safe zone (not covered by Instagram UI top/bottom bars) and animate with at least fade-in and fade-out
   5. The Hebrew font (Heebo or Assistant) is confirmed loaded — not a system fallback — by inspecting rendered glyph shapes
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: Bootstrap Remotion render server (official template, Docker, Express 5, Zod, TypeScript)
-- [ ] 01-02: Build ReelTemplate composition — safe zone, Hebrew font loading, RTL text overlay, fade animation
-- [ ] 01-03: Validate Hebrew RTL smoke test — render Hebrew + English, verify MP4 output visually and structurally
+- [ ] 01-01-PLAN.md — Bootstrap Remotion render server with Express 5, async job queue, Zod schema, Dockerfile, and vitest test infrastructure
+- [ ] 01-02-PLAN.md — Build ReelTemplate composition with Hebrew font loading, RTL text overlays, safe zone positioning, and fade/slide animations
+- [ ] 01-03-PLAN.md — Smoke test render with Hebrew + English text, validate MP4 format, visual verification of RTL and font
 
 ### Phase 2: Python Integration Layer
 **Goal**: A Python `renderer/` module with `VideoRendererProtocol`, `RemotionRenderer` implementation, and a FastAPI endpoint — so Python code can submit a render job, poll to completion, and receive a URL saved as an Airtable attachment, without any Remotion-specific coupling in business logic
@@ -88,7 +88,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Remotion Service Foundation | 0/3 | Not started | - |
+| 1. Remotion Service Foundation | 0/3 | Planning complete | - |
 | 2. Python Integration Layer | 0/3 | Not started | - |
 | 3. Brand Template System | 0/2 | Not started | - |
 | 4. Multi-Segment Text | 0/2 | Not started | - |
