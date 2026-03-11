@@ -2,10 +2,34 @@
 
 import re
 from typing import Any, Literal
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ALLOWED_FONTS = {"Heebo", "Assistant", "Rubik", "Frank Ruhl Libre"}
+
+
+class TextSegment(BaseModel):
+    """A timed text segment for multi-segment Reel rendering.
+
+    Each segment has a role (hook/body/cta), timing (start/end in seconds),
+    and optional per-segment animation style override.
+    """
+
+    text: str
+    start_seconds: float = Field(ge=0.0)
+    end_seconds: float
+    animation_style: Literal["fade", "slide"] = "fade"
+    role: Literal["hook", "body", "cta"]
+
+    @model_validator(mode="after")
+    def validate_timing(self) -> "TextSegment":
+        """Ensure end_seconds is strictly greater than start_seconds."""
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError(
+                f"end_seconds ({self.end_seconds}) must be greater than "
+                f"start_seconds ({self.start_seconds})"
+            )
+        return self
 
 
 class BrandConfig(BaseModel):
@@ -53,11 +77,19 @@ class BrandConfig(BaseModel):
 
 
 class RenderRequest(BaseModel):
-    """Request payload for submitting a video render job."""
+    """Request payload for submitting a video render job.
+
+    Supports two input modes:
+    1. Segments mode: provide ``segments`` array (1-5 TextSegment items)
+    2. Legacy mode: provide both ``hook_text`` and ``body_text``
+
+    Both modes may be provided simultaneously; segments take priority in the
+    rendering pipeline. Providing neither raises a validation error.
+    """
 
     source_video_url: str
-    hook_text: str
-    body_text: str
+    hook_text: str | None = None
+    body_text: str | None = None
     record_id: str
     text_direction: Literal["rtl", "ltr"] = "rtl"
     animation_style: Literal["fade", "slide"] = "fade"
@@ -66,6 +98,49 @@ class RenderRequest(BaseModel):
     client_id: str | None = None
     awareness_stage: int | None = Field(default=None, ge=1, le=5)
     brand_config: BrandConfig | None = None
+    segments: list[TextSegment] | None = None
+
+    @model_validator(mode="after")
+    def validate_content_source(self) -> "RenderRequest":
+        """Validate that content is provided via segments or legacy hook/body text.
+
+        When segments is provided, enforces:
+        - count 1-5
+        - no overlap (each segment starts at or after the previous one ends)
+        - all segments end within duration_in_seconds
+
+        When segments is not provided:
+        - both hook_text and body_text must be present
+        """
+        has_segments = self.segments is not None
+        has_legacy = self.hook_text is not None and self.body_text is not None
+
+        if not has_segments and not has_legacy:
+            raise ValueError(
+                "Provide either 'segments' (list of TextSegment) or both "
+                "'hook_text' and 'body_text'"
+            )
+
+        if has_segments:
+            segs = self.segments
+            if len(segs) < 1 or len(segs) > 5:
+                raise ValueError(
+                    f"segments must contain 1-5 items, got {len(segs)}"
+                )
+            for i in range(1, len(segs)):
+                if segs[i].start_seconds < segs[i - 1].end_seconds:
+                    raise ValueError(
+                        f"Segment {i} (start={segs[i].start_seconds}) overlaps "
+                        f"with segment {i - 1} (end={segs[i - 1].end_seconds})"
+                    )
+            for i, seg in enumerate(segs):
+                if seg.end_seconds > self.duration_in_seconds:
+                    raise ValueError(
+                        f"Segment {i} end_seconds ({seg.end_seconds}) exceeds "
+                        f"duration_in_seconds ({self.duration_in_seconds})"
+                    )
+
+        return self
 
 
 class JobStatus(BaseModel):
