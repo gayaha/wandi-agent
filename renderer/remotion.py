@@ -41,7 +41,7 @@ class RemotionRenderer:
             payload["callbackUrl"] = request.callback_url
 
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = client.post(f"{self.base_url}/renders", json=payload)
+            resp = await client.post(f"{self.base_url}/renders", json=payload)
             resp.raise_for_status()
             return resp.json()["jobId"]
 

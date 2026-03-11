@@ -1,0 +1,413 @@
+"""FastAPI server for wandi-agent — Instagram Reels content generator."""
+
+import asyncio
+import logging
+import sys
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any
+
+import httpx
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+import agent
+import airtable_client as at
+import config
+import ollama_client as ollama
+from renderer import get_renderer, RenderRequest, JobStatus
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
+
+
+# ── Render job state ──────────────────────────────────────────────────────────
+
+# In-memory job store and background task set (single-process, no GC risk)
+_render_jobs: dict[str, dict[str, Any]] = {}
+_background_tasks: set = set()
+
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("wandi-agent starting up...")
+    # Check Ollama connectivity
+    if await ollama.check_health():
+        logger.info("Ollama is reachable")
+    else:
+        logger.warning("Ollama is NOT reachable — generation will fail")
+    yield
+    logger.info("wandi-agent shutting down...")
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="wandi-agent",
+    description="AI agent for generating Instagram Reels content",
+    version="1.1.0",
+    lifespan=lifespan,
+)
+
+# Allow CORS for Edge Functions
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ── Models ────────────────────────────────────────────────────────────────────
+
+class GenerateRequest(BaseModel):
+    client_id: str = Field(..., description="Airtable record ID of the client (recXXX)")
+    batch_type: str = Field(
+        ...,
+        description="Content batch type: חשיפה / מכירה / מעורב",
+    )
+    quantity: int = Field(default=10, ge=1, le=30, description="Number of reels to generate")
+
+
+class GenerateAsyncRequest(BaseModel):
+    """Request model for async generation with callback."""
+    client_id: str = Field(..., description="Airtable record ID of the client (recXXX)")
+    batch_type: str = Field(
+        ...,
+        description="Content batch type: חשיפה / מכירה / מעורב",
+    )
+    quantity: int = Field(default=7, ge=1, le=30, description="Number of reels to generate")
+    callback_url: str = Field(..., description="URL to POST results to when done")
+    user_id: str = Field(..., description="Supabase user UUID")
+    connection_id: str = Field(default="", description="Supabase meta_connection UUID")
+    webhook_secret: str = Field(default="", description="Shared secret for callback auth")
+
+
+class GenerateResponse(BaseModel):
+    success: bool
+    client_name: str | None = None
+    batch_type: str | None = None
+    distribution: dict[str, int] | None = None
+    reels: list[dict[str, Any]] = []
+    count: int = 0
+    saved_count: int = 0
+    errors: list[str] | None = None
+
+
+# ── Background task ──────────────────────────────────────────────────────────
+
+def _resolve_magnet_name(magnet_id: str | None, magnets: list[dict]) -> str:
+    """Look up a magnet's name from the magnets list by record ID."""
+    if not magnet_id or not magnets:
+        return ""
+    for m in magnets:
+        if m.get("id") == magnet_id:
+            return m.get("fields", {}).get("Magnet Name", "")
+    return ""
+
+
+async def _run_generation_and_callback(request: GenerateAsyncRequest):
+    """Background task: generate reels and POST results to callback URL."""
+    batch_id = str(uuid.uuid4())
+    try:
+        logger.info(
+            f"[async] Starting generation: client={request.client_id}, "
+            f"type={request.batch_type}, qty={request.quantity}, batch={batch_id}"
+        )
+
+        # Fetch magnets for name resolution
+        client_record = await at.get_client(request.client_id)
+        client_fields = client_record.get("fields", {})
+        client_name = client_fields.get("Client Name", "")
+        niche_raw = client_fields.get("Niche", "")
+        niche = niche_raw[0] if isinstance(niche_raw, list) and niche_raw else niche_raw
+
+        magnets = await at.get_magnets_for_client(
+            request.client_id, client_name=client_name
+        )
+
+        # Run the existing generation pipeline
+        result = await agent.generate_reels(
+            client_id=request.client_id,
+            batch_type=request.batch_type,
+            quantity=request.quantity,
+        )
+
+        # Map reels to content_projects format
+        projects = []
+        for reel in result.get("reels", []):
+            projects.append({
+                "title": (reel.get("hook", "") or "")[:100],
+                "caption": reel.get("caption", ""),
+                "video_text": reel.get("text_on_video", ""),
+                "hook": reel.get("hook", ""),
+                "hook_type": reel.get("hook_type", ""),
+                "verbal_script": reel.get("verbal_script", ""),
+                "format": reel.get("format", ""),
+                "awareness_stage": reel.get("awareness_stage", ""),
+                "content_goal": {"חשיפה": "exposure", "מכירה": "sales", "מעורב": "mixed"}.get(request.batch_type, "mixed"),
+                "magnet_name": _resolve_magnet_name(
+                    reel.get("magnet_id"), magnets
+                ),
+                "airtable_record_id": reel.get("record_id", ""),
+                "client_airtable_id": request.client_id,
+                "client_name": result.get("client_name", ""),
+                "batch_id": batch_id,
+                "status": "draft",
+            })
+
+        logger.info(
+            f"[async] Generation complete: {len(projects)} reels, "
+            f"sending to callback {request.callback_url}"
+        )
+
+        # POST to callback with retry
+        callback_payload = {
+            "user_id": request.user_id,
+            "connection_id": request.connection_id,
+            "batch_id": batch_id,
+            "projects": projects,
+        }
+
+        headers = {"Content-Type": "application/json"}
+        if request.webhook_secret:
+            headers["X-Webhook-Secret"] = request.webhook_secret
+
+        last_error = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        request.callback_url,
+                        json=callback_payload,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    logger.info(
+                        f"[async] Callback success (attempt {attempt + 1}): "
+                        f"{resp.status_code}"
+                    )
+                    return
+            except Exception as e:
+                last_error = e
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                logger.warning(
+                    f"[async] Callback attempt {attempt + 1} failed: {e}. "
+                    f"Retrying in {wait}s..."
+                )
+                await asyncio.sleep(wait)
+
+        logger.error(f"[async] All callback attempts failed: {last_error}")
+
+    except Exception as e:
+        logger.exception(f"[async] Generation failed for batch {batch_id}: {e}")
+
+        # Try to notify callback about the failure
+        try:
+            error_payload = {
+                "user_id": request.user_id,
+                "connection_id": request.connection_id,
+                "batch_id": batch_id,
+                "projects": [],
+                "error": str(e),
+            }
+            headers = {"Content-Type": "application/json"}
+            if request.webhook_secret:
+                headers["X-Webhook-Secret"] = request.webhook_secret
+
+            async with httpx.AsyncClient(timeout=15) as client:
+                await client.post(
+                    request.callback_url,
+                    json=error_payload,
+                    headers=headers,
+                )
+        except Exception:
+            logger.exception("[async] Failed to send error callback")
+
+
+# ── Render background tasks ───────────────────────────────────────────────────
+
+async def _send_render_callback(callback_url: str, job_data: dict):
+    """POST job result to callback URL with 3-attempt retry and exponential backoff."""
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(callback_url, json=job_data)
+                resp.raise_for_status()
+                return
+        except Exception as e:
+            wait = 2 ** attempt
+            logger.warning(
+                f"Render callback attempt {attempt + 1} failed: {e}, retrying in {wait}s"
+            )
+            await asyncio.sleep(wait)
+    logger.error(f"All render callback attempts failed for {callback_url}")
+
+
+async def _run_render(job_id: str, request: RenderRequest):
+    """Background task: submit to Remotion, poll until done, download file."""
+    renderer = get_renderer()
+    MAX_POLL_ATTEMPTS = 120  # 120 * up-to-5s = 10 min max
+    try:
+        # Submit to Remotion service
+        remotion_job_id = await renderer.render(request)
+        _render_jobs[job_id]["status"] = "rendering"
+        _render_jobs[job_id]["remotion_job_id"] = remotion_job_id
+
+        # Poll until done or timed out
+        for attempt in range(MAX_POLL_ATTEMPTS):
+            status = await renderer.get_status(remotion_job_id)
+            _render_jobs[job_id]["progress"] = status.progress
+            if status.state == "completed":
+                break
+            elif status.state == "failed":
+                raise RuntimeError(f"Remotion render failed: {status.error}")
+            wait = min(2 + attempt, 5)
+            await asyncio.sleep(wait)
+        else:
+            _render_jobs[job_id]["status"] = "timed_out"
+            _render_jobs[job_id]["error"] = "Render timed out after max poll attempts"
+            logger.error(f"Render job {job_id} timed out (remotion: {remotion_job_id})")
+            return
+
+        # Download rendered file from Remotion service
+        _render_jobs[job_id]["status"] = "downloading"
+        tmp_path = f"/tmp/{job_id}-rendered.mp4"
+        await renderer.download_file(remotion_job_id, tmp_path)
+
+        # Mark complete — Plan 02-03 will insert Supabase upload and replace tmp_path with CDN URL
+        _render_jobs[job_id]["status"] = "completed"
+        _render_jobs[job_id]["progress"] = 1.0
+        _render_jobs[job_id]["video_url"] = tmp_path  # Temporary — Plan 02-03 replaces with Supabase URL
+        logger.info(f"Render job {job_id} completed: {tmp_path}")
+
+        # Notify callback if provided
+        if request.callback_url:
+            await _send_render_callback(request.callback_url, _render_jobs[job_id])
+
+    except Exception as e:
+        logger.exception(f"Render job {job_id} failed: {e}")
+        _render_jobs[job_id]["status"] = "failed"
+        _render_jobs[job_id]["error"] = str(e)
+        if request.callback_url:
+            try:
+                await _send_render_callback(request.callback_url, _render_jobs[job_id])
+            except Exception:
+                logger.exception(f"Failed to send error callback for {job_id}")
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health_check():
+    ollama_ok = await ollama.check_health()
+    return {
+        "status": "ok",
+        "ollama": "connected" if ollama_ok else "disconnected",
+        "model": config.OLLAMA_MODEL,
+    }
+
+
+@app.get("/models")
+async def list_models():
+    try:
+        models = await ollama.list_models()
+        return {"models": [m.get("name", m.get("model", "unknown")) for m in models]}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Ollama: {e}")
+
+
+@app.post("/generate", response_model=GenerateResponse)
+async def generate(request: GenerateRequest):
+    """Synchronous generation — blocks until complete."""
+    logger.info(
+        f"Generate request: client={request.client_id}, "
+        f"type={request.batch_type}, qty={request.quantity}"
+    )
+    try:
+        result = await agent.generate_reels(
+            client_id=request.client_id,
+            batch_type=request.batch_type,
+            quantity=request.quantity,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Generation failed")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+
+
+@app.post("/render", status_code=202)
+async def submit_render(request: RenderRequest):
+    """Accept a render job, return immediately with job_id, kick off background task."""
+    job_id = str(uuid.uuid4())
+    _render_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "accepted",
+        "record_id": request.record_id,
+        "progress": 0.0,
+        "video_url": None,
+        "error": None,
+    }
+    task = asyncio.create_task(_run_render(job_id, request))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return {"job_id": job_id, "status": "accepted"}
+
+
+@app.get("/render-status/{job_id}")
+async def get_render_status(job_id: str):
+    """Return current state of a render job, or 404 if not found."""
+    job = _render_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.post("/generate-async", status_code=202)
+async def generate_async(request: GenerateAsyncRequest):
+    """Async generation — returns immediately, POSTs results to callback_url."""
+    logger.info(
+        f"Async generate request: client={request.client_id}, "
+        f"type={request.batch_type}, qty={request.quantity}, "
+        f"callback={request.callback_url}"
+    )
+
+    # Validate batch_type
+    valid_types = {"חשיפה", "מכירה", "מעורב"}
+    if request.batch_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid batch_type '{request.batch_type}'. Must be one of: {valid_types}",
+        )
+
+    # Start background task and return immediately
+    asyncio.create_task(_run_generation_and_callback(request))
+    return {
+        "status": "accepted",
+        "message": "Content generation started. Results will be sent to callback URL.",
+    }
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host=config.HOST,
+        port=config.PORT,
+        log_level=config.LOG_LEVEL,
+        reload=True,
+    )
