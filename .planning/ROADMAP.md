@@ -13,7 +13,7 @@ This milestone adds a standalone video renderer module to the Wandi platform. Th
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Remotion Service Foundation** - Running Node.js Docker service that renders verified Hebrew + English text on Supabase video
-- [ ] **Phase 2: Python Integration Layer** - FastAPI endpoint with VideoRendererProtocol, async job pattern, and Airtable output storage
+- [x] **Phase 2: Python Integration Layer** - FastAPI endpoint with VideoRendererProtocol, async job pattern, and Airtable output storage
 - [ ] **Phase 3: Brand Template System** - Per-client brand templates with font, color, position, and animation parameters
 - [ ] **Phase 4: Multi-Segment Text** - Multiple independent text segments with per-segment timing (hook, body, CTA)
 
@@ -61,11 +61,11 @@ Plans:
   1. Rendering the same text content with two different client brand configs produces visually distinct MP4 outputs (different fonts, colors, or text positions)
   2. Specifying an SDMF awareness stage in the render request changes the visual styling of the output (e.g., Stage 1 bold/high-contrast vs Stage 3 measured/authoritative) without requiring separate template files per stage
   3. Brand template data from one client render job does not appear in any other client's rendered output (isolation verified under concurrent submissions)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: Extend Zod schema and ReelTemplate composition with brand config inputProps (colors, font, position, animationStyle)
-- [ ] 03-02: Implement awareness-stage style mapping and benchmark template CSS for GPU-fallback effects
+- [ ] 03-01-PLAN.md — BrandConfig model, SDMF stage modifiers, multi-font loading, Airtable extraction, Zod schema extension, and pipeline wiring
+- [ ] 03-02-PLAN.md — Brand-aware TextOverlay and ReelTemplate rendering components with integration tests
 
 ### Phase 4: Multi-Segment Text
 **Goal**: A single render request can include multiple independent text segments — hook, body, CTA — each appearing and disappearing at different times in the video with their own animation settings
