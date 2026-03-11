@@ -26,14 +26,14 @@ Requirements for the video renderer milestone. Each maps to roadmap phases.
 
 ### Brand Templates
 
-- [ ] **TMPL-01**: Each client has a brand template defining primary/secondary colors, font selection, text positioning, and overlay style
-- [ ] **TMPL-02**: Text styling varies by SDMF awareness stage (e.g., Stage 1 bold/attention-grabbing vs Stage 3 authoritative/methodical)
+- [x] **TMPL-01**: Each client has a brand template defining primary/secondary colors, font selection, text positioning, and overlay style
+- [x] **TMPL-02**: Text styling varies by SDMF awareness stage (e.g., Stage 1 bold/attention-grabbing vs Stage 3 authoritative/methodical)
 
 ### Integration
 
 - [x] **INTG-01**: Python backend exposes an HTTP endpoint that accepts render requests (text segments + video URL + template config) and returns a job ID
 - [x] **INTG-02**: Python backend defines a `VideoRendererProtocol` abstraction that can be implemented by any rendering engine (Remotion today, others tomorrow)
-- [ ] **INTG-03**: Rendered MP4 is accessible via URL and saved as an Airtable attachment on the content queue record
+- [x] **INTG-03**: Rendered MP4 is accessible via URL and saved as an Airtable attachment on the content queue record
 - [x] **INTG-04**: Raw source video is fetched from Supabase Storage at render time using the video URL
 - [x] **INTG-05**: Render API uses async job pattern (HTTP 202 + polling/callback) to handle 30-300 second render times without timeout
 
@@ -79,11 +79,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HEBR-02 | Phase 1 | Complete (01-03) |
 | HEBR-03 | Phase 1 | Complete (01-02) |
 | SEGM-01 | Phase 4 | Complete (04-01 data contracts, 04-02 SegmentOverlay rendering) |
-| TMPL-01 | Phase 3 | In progress (03-01 data layer done) |
-| TMPL-02 | Phase 3 | In progress (03-01 stage modifiers done) |
+| TMPL-01 | Phase 3 | Complete (03-01, 03-02) |
+| TMPL-02 | Phase 3 | Complete (03-01, 03-02) |
 | INTG-01 | Phase 2 | Complete (02-02) |
 | INTG-02 | Phase 2 | Complete (02-01) |
-| INTG-03 | Phase 2 | Pending |
+| INTG-03 | Phase 2 | Complete (02-03) |
 | INTG-04 | Phase 2 | Complete (02-02) |
 | INTG-05 | Phase 2 | Complete (02-02) |
 
