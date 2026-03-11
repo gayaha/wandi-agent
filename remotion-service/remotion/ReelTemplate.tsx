@@ -4,13 +4,22 @@ import { TextOverlay } from "./TextOverlay.js";
 import { SAFE_ZONE_TOP, SAFE_ZONE_HEIGHT } from "./constants.js";
 import type { ReelInput } from "./schemas.js";
 
+export const POSITION_MAP = {
+  top: "flex-start",
+  center: "center",
+  bottom: "flex-end",
+} as const;
+
 export const ReelTemplate: React.FC<ReelInput> = ({
   sourceVideoLocalPath,
   hookText,
   bodyText,
   animationStyle,
   textDirection,
+  brandConfig,
 }) => {
+  const justifyContent = POSITION_MAP[brandConfig?.textPosition ?? "top"];
+
   return (
     <AbsoluteFill>
       {/* Video layer: OffthreadVideo for source, or solid black fallback for previews */}
@@ -32,7 +41,7 @@ export const ReelTemplate: React.FC<ReelInput> = ({
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          justifyContent: "flex-start",
+          justifyContent,
           padding: "40px 60px",
         }}
       >
@@ -41,6 +50,17 @@ export const ReelTemplate: React.FC<ReelInput> = ({
           bodyText={bodyText}
           animationStyle={animationStyle}
           textDirection={textDirection}
+          primaryColor={brandConfig?.primaryColor}
+          secondaryColor={brandConfig?.secondaryColor}
+          fontFamily={brandConfig?.fontFamily}
+          hookFontSize={brandConfig?.hookFontSize}
+          bodyFontSize={brandConfig?.bodyFontSize}
+          hookFontWeight={brandConfig?.hookFontWeight}
+          overlayColor={brandConfig?.overlayColor}
+          overlayOpacity={brandConfig?.overlayOpacity}
+          borderRadius={brandConfig?.borderRadius}
+          textAlign={brandConfig?.textAlign}
+          animationSpeedMs={brandConfig?.animationSpeedMs}
         />
       </AbsoluteFill>
     </AbsoluteFill>
