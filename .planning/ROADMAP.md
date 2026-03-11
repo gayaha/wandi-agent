@@ -75,11 +75,11 @@ Plans:
   1. A render request with three text segments (hook at seconds 0-3, body at seconds 3-8, CTA at seconds 8-12) produces a video where each segment appears and disappears at the specified times, confirmed by frame inspection
   2. Each segment can have independent animation style (e.g., hook fades in, CTA slides up) without affecting the other segments
   3. Removing, reordering, or adding segments in the request payload changes only the affected segments in the output — no global re-render required
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: Extend render schema and ReelTemplate to accept segment array with per-segment timing and animation
-- [ ] 04-02: End-to-end test with multi-segment Hebrew content (hook/body/CTA) through the full Python-to-Remotion pipeline
+- [ ] 04-01-PLAN.md — TextSegment data model, Zod SegmentSchema, auto-conversion from legacy fields, and updated RemotionRenderer payload
+- [ ] 04-02-PLAN.md — SegmentOverlay rendering component with per-role styling, ReelTemplate Sequence integration, and pipeline integration tests
 
 ## Progress
 
