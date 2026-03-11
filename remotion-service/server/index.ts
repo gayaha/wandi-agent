@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import path from "node:path";
 import express from "express";
 import { initBundle, makeRenderQueue } from "./render-queue.js";
 
@@ -29,6 +30,20 @@ async function start() {
       return;
     }
     res.json(job);
+  });
+
+  app.get("/renders/:id/file", (req, res) => {
+    const job = queue.getJob(req.params.id);
+    if (!job || job.state !== "completed") {
+      res.status(404).json({ error: "Render not complete or not found" });
+      return;
+    }
+    const filePath = path.join("/tmp/renders", `${req.params.id}.mp4`);
+    res.download(filePath, `${req.params.id}.mp4`, (err) => {
+      if (err && !res.headersSent) {
+        res.status(500).json({ error: "File not found on disk" });
+      }
+    });
   });
 
   const port = process.env.PORT || 3000;
