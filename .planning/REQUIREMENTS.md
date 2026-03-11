@@ -22,7 +22,7 @@ Requirements for the video renderer milestone. Each maps to roadmap phases.
 
 ### Text Segments
 
-- [ ] **SEGM-01**: Render request can specify multiple text segments (hook, body, CTA) each with independent start/end timing and animation
+- [x] **SEGM-01**: Render request can specify multiple text segments (hook, body, CTA) each with independent start/end timing and animation
 
 ### Brand Templates
 
@@ -78,7 +78,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HEBR-01 | Phase 1 | Complete (01-02) |
 | HEBR-02 | Phase 1 | Complete (01-03) |
 | HEBR-03 | Phase 1 | Complete (01-02) |
-| SEGM-01 | Phase 4 | In progress (04-01 data contracts done, 04-02 rendering pending) |
+| SEGM-01 | Phase 4 | Complete (04-01 data contracts, 04-02 SegmentOverlay rendering) |
 | TMPL-01 | Phase 3 | In progress (03-01 data layer done) |
 | TMPL-02 | Phase 3 | In progress (03-01 stage modifiers done) |
 | INTG-01 | Phase 2 | Complete (02-02) |
