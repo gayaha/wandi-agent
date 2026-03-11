@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 context gathered
-last_updated: "2026-03-11T02:28:13.775Z"
-last_activity: 2026-03-11 — Completed Plan 02-03 (supabase_client.upload_video, update_content_queue_video_attachment, full pipeline in main.py, 11 new tests)
+stopped_at: Completed Plan 03-01
+last_updated: "2026-03-11T05:06:00Z"
+last_activity: 2026-03-11 — Completed Plan 03-01 (BrandConfig, STAGE_MODIFIERS, multi-font loading, Zod BrandConfigSchema, extract_brand_config, pipeline wiring, 30 new Python tests + 15 new TS tests)
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
-  percent: 55
+  total_plans: 8
+  completed_plans: 7
+  percent: 63
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 
 ## Current Position
 
-Phase: 2 of 4 (Python Integration Layer) — COMPLETE
-Plan: 3 of 3 in current phase (all plans complete)
+Phase: 3 of 4 (Brand Template System) — In Progress
+Plan: 1 of 2 in current phase (plan 03-01 complete)
 Status: Executing
-Last activity: 2026-03-11 — Completed Plan 02-03 (supabase_client.upload_video, update_content_queue_video_attachment, full pipeline in main.py, 11 new tests)
+Last activity: 2026-03-11 — Completed Plan 03-01 (BrandConfig, STAGE_MODIFIERS, multi-font loading, Zod BrandConfigSchema, extract_brand_config, pipeline wiring, 30 new Python tests + 15 new TS tests)
 
-Progress: [######░░░░] 55%
+Progress: [#######░░░] 63%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [######░░░░] 55%
 |-------|-------|-------|----------|
 | 1 | 3 | 8m 10s + continuation | ~3m |
 | 2 | 3 | 3m 56s + 4m 47s + 5m 45s | ~4m 49s |
+| 3 | 1 (of 2) | 5m 33s | ~5m 33s |
 
 **Recent Trend:**
 - Last 5 plans: 01-02 (3m 53s), 01-03 (continuation), 02-01 (3m 56s), 02-02 (4m 47s), 02-03 (5m 45s)
@@ -85,6 +86,10 @@ Recent decisions affecting current work:
 - [02-03]: sync supabase-py client acceptable inside asyncio background task — upload IO does not significantly block event loop
 - [02-03]: destination path pattern is {record_id}/{job_id}.mp4 — groups videos by Airtable record in Supabase Storage
 - [02-03]: Remotion health check added to lifespan startup — warns early if service unreachable
+- [03-01]: BrandConfigSchema uses .optional() without .default({}) — when brandConfig absent, Remotion receives undefined; component handles fallback
+- [03-01]: STAGE_MODIFIERS use relative scale (brand.hook_font_size * scale) not absolute sizes — consistent visual hierarchy across all brand base sizes
+- [03-01]: extract_brand_config() wraps entire BrandConfig(**raw) in try/except — any invalid combination falls back to all-defaults with warning log
+- [03-01]: fontFamily backward-compat export kept in fonts.ts — existing TextOverlay continues working until Plan 02 updates it to getFontFamily()
 
 ### Pending Todos
 
@@ -97,6 +102,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11T02:28:13.774Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-brand-template-system/03-CONTEXT.md
+Last session: 2026-03-11T05:06:00Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: .planning/phases/03-brand-template-system/03-02-PLAN.md

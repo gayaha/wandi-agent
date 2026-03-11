@@ -79,8 +79,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HEBR-02 | Phase 1 | Complete (01-03) |
 | HEBR-03 | Phase 1 | Complete (01-02) |
 | SEGM-01 | Phase 4 | Pending |
-| TMPL-01 | Phase 3 | Pending |
-| TMPL-02 | Phase 3 | Pending |
+| TMPL-01 | Phase 3 | In progress (03-01 data layer done) |
+| TMPL-02 | Phase 3 | In progress (03-01 stage modifiers done) |
 | INTG-01 | Phase 2 | Complete (02-02) |
 | INTG-02 | Phase 2 | Complete (02-01) |
 | INTG-03 | Phase 2 | Pending |

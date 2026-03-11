@@ -64,7 +64,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — BrandConfig model, SDMF stage modifiers, multi-font loading, Airtable extraction, Zod schema extension, and pipeline wiring
+- [x] 03-01-PLAN.md — BrandConfig model, SDMF stage modifiers, multi-font loading, Airtable extraction, Zod schema extension, and pipeline wiring
 - [ ] 03-02-PLAN.md — Brand-aware TextOverlay and ReelTemplate rendering components with integration tests
 
 ### Phase 4: Multi-Segment Text
@@ -90,5 +90,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 |-------|----------------|--------|-----------|
 | 1. Remotion Service Foundation | 3/3 | Complete | 2026-03-11 |
 | 2. Python Integration Layer | 3/3 | Complete | 2026-03-11 |
-| 3. Brand Template System | 0/2 | Not started | - |
+| 3. Brand Template System | 1/2 | In progress | - |
 | 4. Multi-Segment Text | 0/2 | Not started | - |
