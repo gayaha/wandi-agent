@@ -104,6 +104,65 @@ class TestUploadVideo:
         assert any(call.args[0] == config.SUPABASE_BUCKET for call in from_calls)
 
 
+class TestListFolderVideos:
+
+    def test_list_folder_videos_returns_video_paths(self):
+        """list_folder_videos() returns paths of video files in a specific folder."""
+        mock_storage_bucket = MagicMock()
+        mock_storage_bucket.list = MagicMock(return_value=[
+            {"name": "clip1.mp4", "id": "file-id-1"},
+            {"name": "clip2.mov", "id": "file-id-2"},
+            {"name": "thumbnail.jpg", "id": "file-id-3"},
+        ])
+
+        mock_storage = MagicMock()
+        mock_storage.from_ = MagicMock(return_value=mock_storage_bucket)
+
+        mock_client = MagicMock()
+        mock_client.storage = mock_storage
+
+        with patch("supabase_client.create_client", return_value=mock_client):
+            import supabase_client
+            result = supabase_client.list_folder_videos("user-123", "folder-abc")
+
+        assert result == ["user-123/folder-abc/clip1.mp4", "user-123/folder-abc/clip2.mov"]
+        mock_storage_bucket.list.assert_called_once_with(path="user-123/folder-abc")
+
+    def test_list_folder_videos_empty_folder(self):
+        """list_folder_videos() returns empty list when folder has no videos."""
+        mock_storage_bucket = MagicMock()
+        mock_storage_bucket.list = MagicMock(return_value=[])
+
+        mock_storage = MagicMock()
+        mock_storage.from_ = MagicMock(return_value=mock_storage_bucket)
+
+        mock_client = MagicMock()
+        mock_client.storage = mock_storage
+
+        with patch("supabase_client.create_client", return_value=mock_client):
+            import supabase_client
+            result = supabase_client.list_folder_videos("user-123", "empty-folder")
+
+        assert result == []
+
+    def test_list_folder_videos_handles_exception(self):
+        """list_folder_videos() returns empty list on Supabase error."""
+        mock_storage_bucket = MagicMock()
+        mock_storage_bucket.list = MagicMock(side_effect=Exception("network error"))
+
+        mock_storage = MagicMock()
+        mock_storage.from_ = MagicMock(return_value=mock_storage_bucket)
+
+        mock_client = MagicMock()
+        mock_client.storage = mock_storage
+
+        with patch("supabase_client.create_client", return_value=mock_client):
+            import supabase_client
+            result = supabase_client.list_folder_videos("user-123", "bad-folder")
+
+        assert result == []
+
+
 class TestGetSourceVideoUrl:
 
     def test_get_source_video_url_uses_source_bucket(self):
