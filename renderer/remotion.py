@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import config
 from renderer.models import JobStatus, RenderRequest
 
@@ -25,11 +27,23 @@ class RemotionRenderer:
     def __init__(self, base_url: str | None = None) -> None:
         self.base_url = base_url if base_url is not None else config.REMOTION_SERVICE_URL
 
-    async def render(self, request: RenderRequest) -> str:
-        """Submit a render job to the Remotion service, return job_id."""
+    async def render(
+        self,
+        request: RenderRequest,
+        resolved_brand: dict[str, Any] | None = None,
+    ) -> str:
+        """Submit a render job to the Remotion service, return job_id.
+
+        Args:
+            request: The render request with video URL, text, and options.
+            resolved_brand: Optional camelCase brand config dict from
+                resolve_brand_for_render(). When provided, added to payload
+                as 'brandConfig' for Zod validation in Remotion service.
+                When absent, Remotion fills all brand defaults from schema.
+        """
         import httpx
 
-        payload = {
+        payload: dict[str, Any] = {
             "sourceVideoUrl": request.source_video_url,
             "hookText": request.hook_text,
             "bodyText": request.body_text,
@@ -39,6 +53,8 @@ class RemotionRenderer:
         }
         if request.callback_url is not None:
             payload["callbackUrl"] = request.callback_url
+        if resolved_brand is not None:
+            payload["brandConfig"] = resolved_brand
 
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(f"{self.base_url}/renders", json=payload)

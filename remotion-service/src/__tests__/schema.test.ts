@@ -59,4 +59,95 @@ describe("ReelInputSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  // ── BrandConfigSchema tests ────────────────────────────────────────────────
+
+  it("accepts input with no brandConfig (backward compat)", () => {
+    const result = ReelInputSchema.safeParse(validInput);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // brandConfig should be undefined (it's optional)
+      expect(result.data.brandConfig).toBeUndefined();
+    }
+  });
+
+  it("accepts empty brandConfig object and applies all defaults", () => {
+    const result = ReelInputSchema.safeParse({
+      ...validInput,
+      brandConfig: {},
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const bc = result.data.brandConfig;
+      expect(bc).toBeDefined();
+      expect(bc?.primaryColor).toBe("#FFFFFF");
+      expect(bc?.secondaryColor).toBe("#FFFFFF");
+      expect(bc?.fontFamily).toBe("Heebo");
+      expect(bc?.hookFontSize).toBe(52);
+      expect(bc?.bodyFontSize).toBe(36);
+      expect(bc?.overlayColor).toBe("#000000");
+      expect(bc?.overlayOpacity).toBe(0.55);
+      expect(bc?.borderRadius).toBe(16);
+      expect(bc?.textPosition).toBe("top");
+      expect(bc?.textAlign).toBe("center");
+      expect(bc?.animationSpeedMs).toBe(500);
+    }
+  });
+
+  it("accepts partial brandConfig and merges with defaults", () => {
+    const result = ReelInputSchema.safeParse({
+      ...validInput,
+      brandConfig: { primaryColor: "#FF0000" },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const bc = result.data.brandConfig;
+      expect(bc?.primaryColor).toBe("#FF0000");
+      // Other fields should have defaults
+      expect(bc?.fontFamily).toBe("Heebo");
+      expect(bc?.hookFontSize).toBe(52);
+    }
+  });
+
+  it("rejects brandConfig with invalid fontFamily", () => {
+    const result = ReelInputSchema.safeParse({
+      ...validInput,
+      brandConfig: { fontFamily: "Comic Sans" },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects brandConfig with overlayOpacity below 0.3", () => {
+    const result = ReelInputSchema.safeParse({
+      ...validInput,
+      brandConfig: { overlayOpacity: 0.1 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects brandConfig with hookFontSize below 20", () => {
+    const result = ReelInputSchema.safeParse({
+      ...validInput,
+      brandConfig: { hookFontSize: 10 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects brandConfig with hookFontSize above 120", () => {
+    const result = ReelInputSchema.safeParse({
+      ...validInput,
+      brandConfig: { hookFontSize: 200 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts brandConfig with valid fontFamily from curated set", () => {
+    for (const font of ["Heebo", "Assistant", "Rubik", "Frank Ruhl Libre"]) {
+      const result = ReelInputSchema.safeParse({
+        ...validInput,
+        brandConfig: { fontFamily: font },
+      });
+      expect(result.success).toBe(true);
+    }
+  });
 });

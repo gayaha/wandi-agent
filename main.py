@@ -18,7 +18,8 @@ import airtable_client as at
 import config
 import ollama_client as ollama
 import supabase_client
-from renderer import get_renderer, RenderRequest, JobStatus
+from renderer import get_renderer, RenderRequest, JobStatus, BrandConfig
+from renderer.brand import resolve_brand_for_render
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -268,8 +269,17 @@ async def _run_render(job_id: str, request: RenderRequest):
     renderer = get_renderer()
     MAX_POLL_ATTEMPTS = 120  # 120 * up-to-5s = 10 min max
     try:
+        # Fetch brand config from Airtable when client_id is present.
+        # Falls back to all-defaults BrandConfig for backward compatibility.
+        if request.client_id:
+            client_record = await at.get_client(request.client_id)
+            brand_config = at.extract_brand_config(client_record)
+        else:
+            brand_config = BrandConfig()
+        resolved_brand = resolve_brand_for_render(brand_config, request.awareness_stage)
+
         # Submit to Remotion service
-        remotion_job_id = await renderer.render(request)
+        remotion_job_id = await renderer.render(request, resolved_brand=resolved_brand)
         _render_jobs[job_id]["status"] = "rendering"
         _render_jobs[job_id]["remotion_job_id"] = remotion_job_id
 
