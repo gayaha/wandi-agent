@@ -3,12 +3,14 @@ and the background render task lifecycle.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 import pytest_asyncio
 
 from renderer import JobStatus, RenderRequest
+from renderer.models import BrandConfig
+from renderer.brand import resolve_brand_for_render
 
 
 # ---------------------------------------------------------------------------
@@ -469,3 +471,177 @@ class TestFullPipeline:
         data = status_resp.json()
         assert data["status"] == "completed"
         assert data["video_url"] == "https://example.supabase.co/transitions.mp4"
+
+
+# ---------------------------------------------------------------------------
+# Brand config integration: POST /render with client_id
+# ---------------------------------------------------------------------------
+
+class TestBrandConfig:
+
+    @pytest.mark.asyncio
+    async def test_render_with_client_id_fetches_brand(self, app_client):
+        """POST /render with client_id calls at.get_client and at.extract_brand_config."""
+        client_record = {"id": "recTEST", "fields": {"Brand Primary Color": "#FF0000", "Brand Font Family": "Rubik"}}
+        brand_config = BrandConfig(primary_color="#FF0000", font_family="Rubik")
+
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.at.get_client", new_callable=AsyncMock, return_value=client_record) as mock_get_client, \
+             patch("main.at.extract_brand_config", return_value=brand_config) as mock_extract, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock, return_value="https://example.supabase.co/brand.mp4"), \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock, return_value={}), \
+             patch("main.os.remove"):
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-brand")
+            mock_rend.get_status = AsyncMock(return_value=JobStatus(state="completed", progress=1.0))
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "hook_text": "Brand hook!",
+                    "body_text": "Brand body.",
+                    "record_id": "recABC123",
+                    "client_id": "recTEST",
+                },
+            )
+            assert resp.status_code == 202
+
+            # Allow the background task to run
+            await asyncio.sleep(0.1)
+
+        # Verify Airtable calls
+        mock_get_client.assert_called_once_with("recTEST")
+        mock_extract.assert_called_once_with(client_record)
+
+    @pytest.mark.asyncio
+    async def test_render_with_client_id_passes_resolved_brand(self, app_client):
+        """POST /render with client_id and awareness_stage passes resolved brand to renderer."""
+        client_record = {"id": "recTEST", "fields": {"Brand Primary Color": "#FF0000"}}
+        brand_config = BrandConfig(primary_color="#FF0000")
+        resolved_brand_mock = {
+            "primaryColor": "#FF0000",
+            "secondaryColor": "#FFFFFF",
+            "fontFamily": "Heebo",
+            "hookFontSize": 60,
+            "bodyFontSize": 36,
+            "hookFontWeight": 900,
+            "overlayColor": "#000000",
+            "overlayOpacity": 0.55,
+            "borderRadius": 16,
+            "textPosition": "top",
+            "textAlign": "center",
+            "animationSpeedMs": 400,
+        }
+
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.at.get_client", new_callable=AsyncMock, return_value=client_record), \
+             patch("main.at.extract_brand_config", return_value=brand_config), \
+             patch("main.resolve_brand_for_render", return_value=resolved_brand_mock) as mock_resolve, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock, return_value="https://example.supabase.co/test.mp4"), \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock, return_value={}), \
+             patch("main.os.remove"):
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-resolved")
+            mock_rend.get_status = AsyncMock(return_value=JobStatus(state="completed", progress=1.0))
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "hook_text": "Brand hook!",
+                    "body_text": "Brand body.",
+                    "record_id": "recABC123",
+                    "client_id": "recTEST",
+                    "awareness_stage": 1,
+                },
+            )
+            assert resp.status_code == 202
+
+            # Allow the background task to run
+            await asyncio.sleep(0.1)
+
+        # Verify resolve_brand_for_render was called with brand_config and stage 1
+        mock_resolve.assert_called_once_with(brand_config, 1)
+
+        # Verify renderer.render was called with resolved_brand
+        mock_rend.render.assert_called_once()
+        call_kwargs = mock_rend.render.call_args.kwargs
+        assert call_kwargs.get("resolved_brand") == resolved_brand_mock
+
+    @pytest.mark.asyncio
+    async def test_render_without_client_id_uses_defaults(self, app_client):
+        """POST /render without client_id does not call at.get_client and uses default BrandConfig."""
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.at.get_client", new_callable=AsyncMock) as mock_get_client, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock, return_value="https://example.supabase.co/test.mp4"), \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock, return_value={}), \
+             patch("main.os.remove"):
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-defaults")
+            mock_rend.get_status = AsyncMock(return_value=JobStatus(state="completed", progress=1.0))
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "hook_text": "Default hook!",
+                    "body_text": "Default body.",
+                    "record_id": "recABC123",
+                    # No client_id
+                },
+            )
+            assert resp.status_code == 202
+
+            # Allow the background task to run
+            await asyncio.sleep(0.1)
+
+        # at.get_client should NOT have been called
+        mock_get_client.assert_not_called()
+
+        # renderer.render should have been called with a resolved_brand containing defaults
+        mock_rend.render.assert_called_once()
+        call_kwargs = mock_rend.render.call_args.kwargs
+        resolved = call_kwargs.get("resolved_brand")
+        assert resolved is not None
+        assert resolved["primaryColor"] == "#FFFFFF"
+        assert resolved["fontFamily"] == "Heebo"
+        assert resolved["overlayOpacity"] == 0.55
+
+    @pytest.mark.asyncio
+    async def test_render_backward_compat_no_client_id(self, app_client):
+        """POST /render without client_id or awareness_stage returns 202 (backward compat)."""
+        with patch("main.get_renderer") as mock_get_renderer, \
+             patch("main.supabase_client.upload_video", new_callable=AsyncMock, return_value="https://example.supabase.co/compat.mp4"), \
+             patch("main.at.update_content_queue_video_attachment", new_callable=AsyncMock, return_value={}), \
+             patch("main.os.remove"):
+
+            mock_rend = AsyncMock()
+            mock_rend.render = AsyncMock(return_value="remotion-job-compat")
+            mock_rend.get_status = AsyncMock(return_value=JobStatus(state="completed", progress=1.0))
+            mock_rend.download_file = AsyncMock(return_value=None)
+            mock_get_renderer.return_value = mock_rend
+
+            resp = await app_client.post(
+                "/render",
+                json={
+                    "source_video_url": "https://example.com/source.mp4",
+                    "hook_text": "Amazing hook!",
+                    "body_text": "Body content here.",
+                    "record_id": "recABC123",
+                },
+            )
+
+        assert resp.status_code == 202
+        data = resp.json()
+        assert "job_id" in data
+        assert data["status"] == "accepted"
