@@ -247,8 +247,12 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
                 if i < len(projects):
                     projects[i]["source_video_url"] = url
 
-            # Render each reel that has a source video and record_id
-            sem = asyncio.Semaphore(5)
+            # Render each reel that has a source video and record_id.
+            # Remotion processes renders serially, so with N reels the last one
+            # may wait up to N * ~3min before it even starts. Scale the poll
+            # timeout accordingly: base 10min + 3min per reel in the batch.
+            num_reels = len([p for p in projects if p.get("source_video_url") and p.get("airtable_record_id")])
+            max_poll_attempts = 120 + (num_reels * 36)  # base 10min + ~3min per reel
 
             async def _render_one(idx: int, project: dict) -> None:
                 source_url = project.get("source_video_url")
@@ -256,64 +260,63 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
                 if not source_url or not record_id:
                     return
 
-                async with sem:
+                try:
+                    render_req = RenderRequest(
+                        source_video_url=source_url,
+                        hook_text=project.get("video_text", ""),
+                        body_text=project.get("verbal_script", ""),
+                        record_id=record_id,
+                        client_id=request.client_id,
+                        awareness_stage=_AWARENESS_STAGE_MAP.get(
+                            project.get("awareness_stage", ""), None
+                        ),
+                    )
+
+                    renderer = get_renderer()
+                    brand_config = at.extract_brand_config(client_record)
+                    resolved_brand = resolve_brand_for_render(
+                        brand_config, render_req.awareness_stage
+                    )
+                    segments = _build_segments(render_req)
+
+                    remotion_job_id = await renderer.render(
+                        render_req, resolved_brand=resolved_brand, segments=segments
+                    )
+
+                    # Poll until done
+                    for attempt in range(max_poll_attempts):
+                        status = await renderer.get_status(remotion_job_id)
+                        if status.state == "completed":
+                            break
+                        elif status.state == "failed":
+                            raise RuntimeError(f"Render failed: {status.error}")
+                        wait = min(2 + attempt, 5)
+                        await asyncio.sleep(wait)
+                    else:
+                        raise RuntimeError("Render timed out")
+
+                    # Download + upload
+                    tmp_path = f"/tmp/{record_id}-{remotion_job_id}.mp4"
+                    await renderer.download_file(remotion_job_id, tmp_path)
+
+                    destination = f"{record_id}/{remotion_job_id}.mp4"
+                    video_url = await supabase_client.upload_video(tmp_path, destination)
+
+                    await at.update_content_queue_video_attachment(record_id, video_url)
+
                     try:
-                        render_req = RenderRequest(
-                            source_video_url=source_url,
-                            hook_text=project.get("video_text", ""),
-                            body_text=project.get("verbal_script", ""),
-                            record_id=record_id,
-                            client_id=request.client_id,
-                            awareness_stage=_AWARENESS_STAGE_MAP.get(
-                                project.get("awareness_stage", ""), None
-                            ),
-                        )
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
 
-                        renderer = get_renderer()
-                        brand_config = at.extract_brand_config(client_record)
-                        resolved_brand = resolve_brand_for_render(
-                            brand_config, render_req.awareness_stage
-                        )
-                        segments = _build_segments(render_req)
+                    project["rendered_video_url"] = video_url
+                    project["status"] = "rendered"
+                    logger.info(f"[async] Rendered reel {idx}: {video_url}")
 
-                        remotion_job_id = await renderer.render(
-                            render_req, resolved_brand=resolved_brand, segments=segments
-                        )
-
-                        # Poll until done
-                        for attempt in range(120):
-                            status = await renderer.get_status(remotion_job_id)
-                            if status.state == "completed":
-                                break
-                            elif status.state == "failed":
-                                raise RuntimeError(f"Render failed: {status.error}")
-                            wait = min(2 + attempt, 5)
-                            await asyncio.sleep(wait)
-                        else:
-                            raise RuntimeError("Render timed out")
-
-                        # Download + upload
-                        tmp_path = f"/tmp/{record_id}-{remotion_job_id}.mp4"
-                        await renderer.download_file(remotion_job_id, tmp_path)
-
-                        destination = f"{record_id}/{remotion_job_id}.mp4"
-                        video_url = await supabase_client.upload_video(tmp_path, destination)
-
-                        await at.update_content_queue_video_attachment(record_id, video_url)
-
-                        try:
-                            os.remove(tmp_path)
-                        except OSError:
-                            pass
-
-                        project["rendered_video_url"] = video_url
-                        project["status"] = "rendered"
-                        logger.info(f"[async] Rendered reel {idx}: {video_url}")
-
-                    except Exception as e:
-                        logger.error(f"[async] Render failed for reel {idx}: {e}")
-                        project["render_error"] = str(e)
-                        project["status"] = "render_failed"
+                except Exception as e:
+                    logger.error(f"[async] Render failed for reel {idx}: {e}")
+                    project["render_error"] = str(e)
+                    project["status"] = "render_failed"
 
             await asyncio.gather(
                 *[_render_one(i, p) for i, p in enumerate(projects)]
