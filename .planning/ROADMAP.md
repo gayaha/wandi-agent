@@ -46,12 +46,12 @@ Plans:
   3. The rendered MP4 URL is saved as an attachment on the correct Airtable content queue record and is accessible via that URL
   4. Source video is fetched from Supabase Storage at render time using the video URL in the request — no manual download step required from the caller
   5. Swapping the renderer engine (replacing `RemotionRenderer` with a different implementation of `VideoRendererProtocol`) requires zero changes to the FastAPI endpoint or any calling code
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: Define VideoRendererProtocol, RenderRequest/JobStatus models, and RemotionRenderer skeleton
-- [ ] 02-02: Implement async job pattern — FastAPI endpoint returns 202, status polling endpoint, httpx async client calling Phase 1 service
-- [ ] 02-03: Wire Supabase source video fetch and Airtable attachment upload (URL-based)
+- [ ] 02-01-PLAN.md — Define VideoRendererProtocol, RenderRequest/JobStatus models, RemotionRenderer skeleton, and pytest test infrastructure
+- [ ] 02-02-PLAN.md — Implement async job pattern with FastAPI routes (POST /render, GET /render-status), background polling task, and Remotion file-download endpoint
+- [ ] 02-03-PLAN.md — Wire Supabase Storage upload for rendered videos and Airtable attachment PATCH into the render pipeline
 
 ### Phase 3: Brand Template System
 **Goal**: The render pipeline accepts per-client brand configuration — primary/secondary colors, font family, text positioning, and awareness-stage styling — and produces visually distinct, branded output for each client
@@ -84,7 +84,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
