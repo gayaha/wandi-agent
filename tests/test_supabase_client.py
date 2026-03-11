@@ -21,7 +21,7 @@ class TestUploadVideo:
         mock_client = MagicMock()
         mock_client.storage = mock_storage
 
-        with patch("supabase.create_client", return_value=mock_client), \
+        with patch("supabase_client.create_client", return_value=mock_client), \
              patch("builtins.open", mock_open(read_data=b"fake video content")):
             import supabase_client
             await supabase_client.upload_video("/tmp/job456-rendered.mp4", "rec123/job456.mp4")
@@ -45,13 +45,13 @@ class TestUploadVideo:
         mock_client = MagicMock()
         mock_client.storage = mock_storage
 
-        with patch("supabase.create_client", return_value=mock_client), \
+        with patch("supabase_client.create_client", return_value=mock_client), \
              patch("builtins.open", mock_open(read_data=b"fake")):
             import supabase_client
             await supabase_client.upload_video("/tmp/test.mp4", "dest.mp4")
 
         call_kwargs = mock_storage_bucket.upload.call_args
-        # file_options should be the keyword arg or positional
+        assert call_kwargs is not None, "upload() should have been called"
         file_options = call_kwargs.kwargs.get("file_options")
         if file_options is None and len(call_kwargs.args) >= 3:
             file_options = call_kwargs.args[2]
@@ -74,7 +74,7 @@ class TestUploadVideo:
         mock_client = MagicMock()
         mock_client.storage = mock_storage
 
-        with patch("supabase.create_client", return_value=mock_client), \
+        with patch("supabase_client.create_client", return_value=mock_client), \
              patch("builtins.open", mock_open(read_data=b"fake")):
             import supabase_client
             result = await supabase_client.upload_video("/tmp/job456-rendered.mp4", "rec123/job456.mp4")
@@ -94,7 +94,7 @@ class TestUploadVideo:
         mock_client = MagicMock()
         mock_client.storage = mock_storage
 
-        with patch("supabase.create_client", return_value=mock_client), \
+        with patch("supabase_client.create_client", return_value=mock_client), \
              patch("builtins.open", mock_open(read_data=b"fake")):
             import supabase_client
             await supabase_client.upload_video("/tmp/test.mp4", "dest/test.mp4")
@@ -119,7 +119,7 @@ class TestGetSourceVideoUrl:
         mock_client = MagicMock()
         mock_client.storage = mock_storage
 
-        with patch("supabase.create_client", return_value=mock_client):
+        with patch("supabase_client.create_client", return_value=mock_client):
             import supabase_client
             result = supabase_client.get_source_video_url("client123/video.mp4")
 
