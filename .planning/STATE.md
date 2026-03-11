@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed Plan 02-01 (renderer protocol + models + skeleton)
-last_updated: "2026-03-11T01:58:34Z"
-last_activity: 2026-03-11 — Completed Plan 02-01 (VideoRendererProtocol, RenderRequest/JobStatus models, RemotionRenderer skeleton, pytest infrastructure)
+stopped_at: Completed Plan 02-02 (async render routes + background task + Remotion file endpoint)
+last_updated: "2026-03-11T02:06:41Z"
+last_activity: 2026-03-11 — Completed Plan 02-02 (POST /render, GET /render-status, _run_render background task, GET /renders/:id/file, 17 new tests)
 progress:
   total_phases: 4
   completed_phases: 1
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-11)
 ## Current Position
 
 Phase: 2 of 4 (Python Integration Layer)
-Plan: 1 of 3 in current phase (Plan 02-01 complete)
+Plan: 2 of 3 in current phase (Plans 02-01 and 02-02 complete)
 Status: Executing
-Last activity: 2026-03-11 — Completed Plan 02-01 (VideoRendererProtocol, RenderRequest/JobStatus models, RemotionRenderer skeleton, pytest infrastructure)
+Last activity: 2026-03-11 — Completed Plan 02-02 (POST /render, GET /render-status, _run_render background task, GET /renders/:id/file, 17 new tests)
 
-Progress: [####░░░░░░] 36%
+Progress: [#####░░░░░] 45%
 
 ## Performance Metrics
 
@@ -44,10 +44,10 @@ Progress: [####░░░░░░] 36%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 3 | 8m 10s + continuation | ~3m |
-| 2 (partial) | 1 | 3m 56s | 3m 56s |
+| 2 (partial) | 2 | 3m 56s + 4m 47s | ~4m 22s |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4m 17s), 01-02 (3m 53s), 01-03 (continuation), 02-01 (3m 56s)
+- Last 5 plans: 01-01 (4m 17s), 01-02 (3m 53s), 01-03 (continuation), 02-01 (3m 56s), 02-02 (4m 47s)
 - Trend: Stable velocity
 
 *Updated after each plan completion*
@@ -77,6 +77,10 @@ Recent decisions affecting current work:
 - [02-01]: RemotionRenderer uses lazy imports for httpx inside methods — avoids import cost at module load
 - [02-01]: State mapping dict (_STATE_MAP) in remotion.py normalizes Remotion service states to internal states
 - [02-01]: get_renderer() factory in renderer/__init__.py provides clean injection point for testing and future swaps
+- [02-02]: app_client fixture uses ASGITransport(app=app) so tests route through ASGI without real HTTP socket
+- [02-02]: _background_tasks module-level set prevents asyncio garbage-collecting in-flight tasks
+- [02-02]: MAX_POLL_ATTEMPTS=120 with sleep capped at 5s gives 10-minute max render wait
+- [02-02]: _run_render stores tmp_path as video_url — Plan 02-03 replaces with Supabase CDN URL
 
 ### Pending Todos
 
@@ -89,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-11T01:58:34Z
-Stopped at: Completed Plan 02-01 (renderer protocol + models + skeleton)
-Resume file: .planning/phases/02-python-integration-layer/02-02-PLAN.md
+Last session: 2026-03-11T02:06:41Z
+Stopped at: Completed Plan 02-02 (async render routes + background task + Remotion file endpoint)
+Resume file: .planning/phases/02-python-integration-layer/02-03-PLAN.md

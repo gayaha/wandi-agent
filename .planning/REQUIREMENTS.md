@@ -31,11 +31,11 @@ Requirements for the video renderer milestone. Each maps to roadmap phases.
 
 ### Integration
 
-- [ ] **INTG-01**: Python backend exposes an HTTP endpoint that accepts render requests (text segments + video URL + template config) and returns a job ID
-- [ ] **INTG-02**: Python backend defines a `VideoRendererProtocol` abstraction that can be implemented by any rendering engine (Remotion today, others tomorrow)
+- [x] **INTG-01**: Python backend exposes an HTTP endpoint that accepts render requests (text segments + video URL + template config) and returns a job ID
+- [x] **INTG-02**: Python backend defines a `VideoRendererProtocol` abstraction that can be implemented by any rendering engine (Remotion today, others tomorrow)
 - [ ] **INTG-03**: Rendered MP4 is accessible via URL and saved as an Airtable attachment on the content queue record
-- [ ] **INTG-04**: Raw source video is fetched from Supabase Storage at render time using the video URL
-- [ ] **INTG-05**: Render API uses async job pattern (HTTP 202 + polling/callback) to handle 30-300 second render times without timeout
+- [x] **INTG-04**: Raw source video is fetched from Supabase Storage at render time using the video URL
+- [x] **INTG-05**: Render API uses async job pattern (HTTP 202 + polling/callback) to handle 30-300 second render times without timeout
 
 ## v2 Requirements
 
@@ -81,11 +81,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SEGM-01 | Phase 4 | Pending |
 | TMPL-01 | Phase 3 | Pending |
 | TMPL-02 | Phase 3 | Pending |
-| INTG-01 | Phase 2 | Pending |
-| INTG-02 | Phase 2 | Pending |
+| INTG-01 | Phase 2 | Complete (02-02) |
+| INTG-02 | Phase 2 | Complete (02-01) |
 | INTG-03 | Phase 2 | Pending |
-| INTG-04 | Phase 2 | Pending |
-| INTG-05 | Phase 2 | Pending |
+| INTG-04 | Phase 2 | Complete (02-02) |
+| INTG-05 | Phase 2 | Complete (02-02) |
 
 **Coverage:**
 - v1 requirements: 15 total
