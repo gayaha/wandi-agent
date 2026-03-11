@@ -103,7 +103,8 @@ def _build_queue_record(
 
 
 async def generate_reels(
-    client_id: str, batch_type: str, quantity: int = 10
+    client_id: str, batch_type: str, quantity: int = 10,
+    folders: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Main generation pipeline.
 
@@ -157,6 +158,7 @@ async def generate_reels(
         viral_content=data["viral_pool"],
         rtm_events=data["rtm_events"],
         insights=data["insights"],
+        folders=folders,
     )
 
     result = await ollama.generate_json(prompt, system=prompts.SYSTEM_PROMPT)

@@ -60,6 +60,11 @@ BATCH_GENERATION_PROMPT = """אתה צריך ליצור {quantity} רילסים 
 {insights_text}
 
 ═══════════════════════════════════════
+תיקיות סרטונים זמינות (בחר תיקיה רלוונטית לכל רילס):
+═══════════════════════════════════════
+{folders_text}
+
+═══════════════════════════════════════
 הנחיות ליצירת כל רילס:
 ═══════════════════════════════════════
 
@@ -73,6 +78,7 @@ BATCH_GENERATION_PROMPT = """אתה צריך ליצור {quantity} רילסים 
 7. content_type — חשיפה או מכירה
 8. awareness_stage — Unaware / Problem-Aware / Solution-Aware
 9. magnet_id — ה-record ID של המגנט המתאים (אם רלוונטי, אחרת null)
+10. folder_id — ה-ID של התיקיה הכי רלוונטית להוק מרשימת התיקיות הזמינות (אם אין תיקיות — null). נסה לגוון בין התיקיות ולא לבחור באותה תיקיה כל הזמן.
 
 חשוב:
 - כל רילס צריך להיות שונה ומגוון
@@ -95,7 +101,8 @@ BATCH_GENERATION_PROMPT = """אתה צריך ליצור {quantity} רילסים 
       "format": "...",
       "content_type": "...",
       "awareness_stage": "...",
-      "magnet_id": "..." או null
+      "magnet_id": "..." או null,
+      "folder_id": "..." או null
     }}
   ]
 }}"""
@@ -201,6 +208,19 @@ def format_insights(insights: dict | None) -> str:
     )
 
 
+def format_folders(folders: dict[str, str]) -> str:
+    """Format folders map for prompt insertion."""
+    if not folders:
+        return "אין תיקיות סרטונים זמינות. החזר null בשדה folder_id."
+
+    lines = []
+    for folder_id, display_name in folders.items():
+        lines.append(f"- {folder_id}: {display_name}")
+    lines.append("")
+    lines.append("לכל רילס, בחר את ה-folder_id של התיקיה הכי רלוונטית להוק שיצרת.")
+    return "\n".join(lines)
+
+
 def format_distribution(distribution: dict[str, int]) -> str:
     """Format content distribution plan for prompt insertion."""
     lines = []
@@ -229,6 +249,7 @@ def build_generation_prompt(
     viral_content: list[dict],
     rtm_events: list[dict],
     insights: dict | None,
+    folders: dict[str, str] | None = None,
 ) -> str:
     """Build the full generation prompt with all context."""
     return BATCH_GENERATION_PROMPT.format(
@@ -245,4 +266,5 @@ def build_generation_prompt(
         viral_content_text=format_viral_content(viral_content),
         rtm_text=format_rtm_events(rtm_events),
         insights_text=format_insights(insights),
+        folders_text=format_folders(folders or {}),
     )
