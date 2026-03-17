@@ -2,13 +2,15 @@ import { Composition } from "remotion";
 import { ReelTemplate } from "./ReelTemplate.js";
 import { ReelInputSchema } from "./schemas.js";
 
+const FPS = 30;
+
 export const RemotionRoot: React.FC = () => {
   return (
     <Composition
       id="ReelTemplate"
       component={ReelTemplate}
-      durationInFrames={90 * 30}
-      fps={30}
+      durationInFrames={FPS * 15}
+      fps={FPS}
       width={1080}
       height={1920}
       schema={ReelInputSchema}

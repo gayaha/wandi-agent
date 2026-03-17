@@ -27,6 +27,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "rendered-videos")
 SUPABASE_SOURCE_BUCKET = os.getenv("SUPABASE_SOURCE_BUCKET", "source-videos")
+SUPABASE_RAW_MEDIA_BUCKET = os.getenv("SUPABASE_RAW_MEDIA_BUCKET", "raw-media")
 
 # Remotion renderer service
 REMOTION_SERVICE_URL = os.getenv("REMOTION_SERVICE_URL", "http://localhost:3000")

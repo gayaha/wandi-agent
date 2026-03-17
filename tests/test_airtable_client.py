@@ -32,9 +32,9 @@ class TestUpdateContentQueueVideoAttachment:
         json_body = call_kwargs.kwargs.get("json") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
         assert json_body is not None, "PATCH request must include json body"
         assert "fields" in json_body
-        assert "Rendered Video" in json_body["fields"]
-        attachment_value = json_body["fields"]["Rendered Video"]
-        assert isinstance(attachment_value, list), "Rendered Video must be a list"
+        assert "Final Video" in json_body["fields"]
+        attachment_value = json_body["fields"]["Final Video"]
+        assert isinstance(attachment_value, list), "Final Video must be a list"
         assert len(attachment_value) == 1
         assert attachment_value[0] == {"url": video_url}
 

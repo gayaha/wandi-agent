@@ -51,20 +51,37 @@ def _build_segments(request: RenderRequest) -> list[dict[str, Any]]:
             for s in request.segments
         ]
 
-    # Legacy mode: auto-convert hook_text/body_text to 2 equal-duration segments
-    duration = request.duration_in_seconds
-    mid = duration / 2
+    # Legacy mode: auto-convert hook_text/body_text to segments.
+    # Use 15 as placeholder for segment timing — Remotion will detect
+    # the actual video duration via ffprobe and rescale segments.
+    duration = request.duration_in_seconds or 15
+
+    # Hook-only reel: single segment spanning full duration
+    if not request.body_text:
+        return [
+            {
+                "text": request.hook_text or "",
+                "startSeconds": 0.0,
+                "endSeconds": float(duration),
+                "animationStyle": request.animation_style,
+                "role": "hook",
+            },
+        ]
+
+    # Hook + text reel: hook gets 40%, body gets 60%
+    # (hooks are short and punchy, body text needs more screen time)
+    hook_end = duration * 0.4
     return [
         {
             "text": request.hook_text or "",
             "startSeconds": 0.0,
-            "endSeconds": mid,
+            "endSeconds": hook_end,
             "animationStyle": request.animation_style,
             "role": "hook",
         },
         {
             "text": request.body_text or "",
-            "startSeconds": mid,
+            "startSeconds": hook_end,
             "endSeconds": float(duration),
             "animationStyle": request.animation_style,
             "role": "body",
@@ -155,6 +172,10 @@ class GenerateAsyncRequest(BaseModel):
         default_factory=dict,
         description="Map of folder_id → display name for video selection",
     )
+    content_sources: list[str] = Field(
+        default_factory=list,
+        description="Data sources to fetch: hooks, viral_pool, rtm_events, style_examples, insights. Empty = all.",
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -170,16 +191,6 @@ class GenerateResponse(BaseModel):
 
 # ── Background task ──────────────────────────────────────────────────────────
 
-def _resolve_magnet_name(magnet_id: str | None, magnets: list[dict]) -> str:
-    """Look up a magnet's name from the magnets list by record ID."""
-    if not magnet_id or not magnets:
-        return ""
-    for m in magnets:
-        if m.get("id") == magnet_id:
-            return m.get("fields", {}).get("Magnet Name", "")
-    return ""
-
-
 async def _run_generation_and_callback(request: GenerateAsyncRequest):
     """Background task: generate reels and POST results to callback URL."""
     batch_id = str(uuid.uuid4())
@@ -189,48 +200,36 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
             f"type={request.batch_type}, qty={request.quantity}, batch={batch_id}"
         )
 
-        # Fetch magnets for name resolution
-        client_record = await at.get_client(request.client_id)
-        client_fields = client_record.get("fields", {})
-        client_name = client_fields.get("Client Name", "")
-        niche_raw = client_fields.get("Niche", "")
-        niche = niche_raw[0] if isinstance(niche_raw, list) and niche_raw else niche_raw
-
-        magnets = await at.get_magnets_for_client(
-            request.client_id, client_name=client_name
-        )
-
-        # Run the existing generation pipeline
+        # Run the generation pipeline (fetches client + magnets internally)
         result = await agent.generate_reels(
             client_id=request.client_id,
             batch_type=request.batch_type,
             quantity=request.quantity,
             folders=request.folders,
+            content_sources=request.content_sources or None,
         )
 
         # Map reels to content_projects format
         projects = []
         for reel in result.get("reels", []):
             projects.append({
-                "title": (reel.get("hook", "") or "")[:100],
                 "caption": reel.get("caption", ""),
-                "video_text": reel.get("text_on_video", ""),
-                "hook": reel.get("hook", ""),
+                "video_text": reel.get("text_on_video") or "",
+                "hook": reel.get("hook") or "",
                 "hook_type": reel.get("hook_type", ""),
-                "verbal_script": reel.get("verbal_script", ""),
-                "format": reel.get("format", ""),
                 "awareness_stage": reel.get("awareness_stage", ""),
-                "content_goal": {"חשיפה": "exposure", "מכירה": "sales", "מעורב": "mixed"}.get(request.batch_type, "mixed"),
-                "magnet_name": _resolve_magnet_name(
-                    reel.get("magnet_id"), magnets
-                ),
+                "content_goal": {
+                    "חשיפה": "exposure",
+                    "מכירה": "sales",
+                    "מעורב": "mixed",
+                }.get(reel.get("content_type", ""), "exposure"),
+                "magnet_name": reel.get("magnet_name", ""),
                 "airtable_record_id": reel.get("record_id", ""),
                 "client_airtable_id": request.client_id,
                 "client_name": result.get("client_name", ""),
                 "batch_id": batch_id,
                 "folder_id": reel.get("folder_id"),
                 "source_video_url": None,
-                "rendered_video_url": None,
                 "render_error": None,
                 "status": "draft",
             })
@@ -247,12 +246,17 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
                 if i < len(projects):
                     projects[i]["source_video_url"] = url
 
+            # Fetch client record once for brand config (used by all renders)
+            client_record = await at.get_client(request.client_id)
+
             # Render each reel that has a source video and record_id.
             # Remotion processes renders serially, so with N reels the last one
             # may wait up to N * ~3min before it even starts. Scale the poll
             # timeout accordingly: base 10min + 3min per reel in the batch.
             num_reels = len([p for p in projects if p.get("source_video_url") and p.get("airtable_record_id")])
-            max_poll_attempts = 120 + (num_reels * 36)  # base 10min + ~3min per reel
+            # With parallel rendering (MAX_CONCURRENT_RENDERS=2), renders overlap.
+            # Base 10min + ~3min per concurrent "wave" of renders.
+            max_poll_attempts = 120 + (max(1, (num_reels + 1) // 2) * 36)
 
             async def _render_one(idx: int, project: dict) -> None:
                 source_url = project.get("source_video_url")
@@ -263,13 +267,18 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
                 try:
                     render_req = RenderRequest(
                         source_video_url=source_url,
-                        hook_text=project.get("video_text", ""),
-                        body_text=project.get("verbal_script", ""),
+                        hook_text=project.get("hook") or "",
+                        body_text=project.get("video_text") or "",
                         record_id=record_id,
                         client_id=request.client_id,
                         awareness_stage=_AWARENESS_STAGE_MAP.get(
                             project.get("awareness_stage", ""), None
                         ),
+                    )
+
+                    logger.info(
+                        f"[Render] Reel {idx}: duration_in_seconds={render_req.duration_in_seconds}, "
+                        f"source_url={source_url[:100]}..."
                     )
 
                     renderer = get_renderer()
@@ -302,21 +311,29 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
                     destination = f"{record_id}/{remotion_job_id}.mp4"
                     video_url = await supabase_client.upload_video(tmp_path, destination)
 
-                    await at.update_content_queue_video_attachment(record_id, video_url)
-
                     try:
                         os.remove(tmp_path)
                     except OSError:
                         pass
 
-                    project["rendered_video_url"] = video_url
-                    project["status"] = "rendered"
+                    # Mark as rendered once video is in Supabase (before Airtable update)
+                    project["source_video_url"] = video_url
+                    project["status"] = "draft"
                     logger.info(f"[async] Rendered reel {idx}: {video_url}")
+
+                    # Airtable attachment update — separate try-except so a failure
+                    # here does not mark the entire render as failed.
+                    try:
+                        await at.update_content_queue_video_attachment(record_id, video_url)
+                    except Exception as e:
+                        logger.error(
+                            f"[async] Airtable attachment update failed for reel {idx}: {e}"
+                        )
 
                 except Exception as e:
                     logger.error(f"[async] Render failed for reel {idx}: {e}")
                     project["render_error"] = str(e)
-                    project["status"] = "render_failed"
+                    project["status"] = "draft"
 
             await asyncio.gather(
                 *[_render_one(i, p) for i, p in enumerate(projects)]
@@ -458,9 +475,6 @@ async def _run_render(job_id: str, request: RenderRequest):
         destination = f"{request.record_id}/{job_id}.mp4"
         video_url = await supabase_client.upload_video(tmp_path, destination)
 
-        # Save as Airtable attachment
-        await at.update_content_queue_video_attachment(request.record_id, video_url)
-
         # Clean up temp file
         try:
             os.remove(tmp_path)
@@ -472,6 +486,13 @@ async def _run_render(job_id: str, request: RenderRequest):
         _render_jobs[job_id]["progress"] = 1.0
         _render_jobs[job_id]["video_url"] = video_url
         logger.info(f"Render job {job_id} completed: {video_url}")
+
+        # Airtable attachment update — separate try-except so a failure
+        # here does not mark the entire render as failed.
+        try:
+            await at.update_content_queue_video_attachment(request.record_id, video_url)
+        except Exception as e:
+            logger.error(f"Airtable attachment update failed for job {job_id}: {e}")
 
         # Notify callback if provided
         if request.callback_url:
@@ -591,6 +612,32 @@ async def pick_video(request: PickVideoRequest):
     """Pick a random source video from the user's raw-media library."""
     url = supabase_client.pick_random_source_video(request.user_id)
     return {"video_url": url}
+
+
+# ── Startup validation ────────────────────────────────────────────────────────
+
+_REQUIRED_ENV_VARS = [
+    "SUPABASE_URL",
+    "SUPABASE_KEY",
+    "AIRTABLE_API_KEY",
+    "AIRTABLE_BASE_ID",
+    "OLLAMA_BASE_URL",
+]
+
+
+def _validate_env():
+    """Check that all required env vars are set and non-empty. Exit if any missing."""
+    missing = [v for v in _REQUIRED_ENV_VARS if not os.environ.get(v, "").strip()]
+    if missing:
+        print(
+            f"FATAL: Missing required environment variables: {', '.join(missing)}\n"
+            "Set them in .env or export before starting wandi-agent.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+_validate_env()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

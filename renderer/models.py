@@ -93,7 +93,7 @@ class RenderRequest(BaseModel):
     record_id: str
     text_direction: Literal["rtl", "ltr"] = "rtl"
     animation_style: Literal["fade", "slide"] = "fade"
-    duration_in_seconds: int = Field(default=15, ge=3, le=90)
+    duration_in_seconds: int | None = Field(default=None, ge=3, le=600)
     callback_url: str | None = None
     client_id: str | None = None
     awareness_stage: int | None = Field(default=None, ge=1, le=5)
@@ -133,12 +133,16 @@ class RenderRequest(BaseModel):
                         f"Segment {i} (start={segs[i].start_seconds}) overlaps "
                         f"with segment {i - 1} (end={segs[i - 1].end_seconds})"
                     )
-            for i, seg in enumerate(segs):
-                if seg.end_seconds > self.duration_in_seconds:
-                    raise ValueError(
-                        f"Segment {i} end_seconds ({seg.end_seconds}) exceeds "
-                        f"duration_in_seconds ({self.duration_in_seconds})"
-                    )
+            # Only check segment bounds when explicit duration is set.
+            # When duration is None, Remotion will detect the actual video
+            # duration via ffprobe and rescale segments accordingly.
+            if self.duration_in_seconds is not None:
+                for i, seg in enumerate(segs):
+                    if seg.end_seconds > self.duration_in_seconds:
+                        raise ValueError(
+                            f"Segment {i} end_seconds ({seg.end_seconds}) exceeds "
+                            f"duration_in_seconds ({self.duration_in_seconds})"
+                        )
 
         return self
 

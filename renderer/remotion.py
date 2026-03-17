@@ -52,8 +52,11 @@ class RemotionRenderer:
             "sourceVideoUrl": request.source_video_url,
             "textDirection": request.text_direction,
             "animationStyle": request.animation_style,
-            "durationInSeconds": request.duration_in_seconds,
         }
+        # Only include durationInSeconds when explicitly set.
+        # When omitted, Remotion detects actual video duration via ffprobe.
+        if request.duration_in_seconds is not None:
+            payload["durationInSeconds"] = request.duration_in_seconds
 
         if segments is not None:
             # New path: send segments array; Zod validates via SegmentSchema

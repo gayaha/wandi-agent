@@ -6,6 +6,9 @@ import { initBundle, makeRenderQueue } from "./render-queue.js";
 const app = express();
 app.use(express.json());
 
+// Serve downloaded source videos so Remotion's headless Chrome can access them
+app.use("/tmp", express.static("/tmp"));
+
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
@@ -15,7 +18,8 @@ async function start() {
   const bundlePath = await initBundle();
   console.log("Bundle ready.");
 
-  const queue = makeRenderQueue(bundlePath);
+  const port = Number(process.env.PORT) || 3000;
+  const queue = makeRenderQueue(bundlePath, port);
 
   app.post("/renders", (req, res) => {
     const jobId = crypto.randomUUID();
@@ -46,7 +50,6 @@ async function start() {
     });
   });
 
-  const port = process.env.PORT || 3000;
   app.listen(port, () => {
     console.log(`Remotion render server ready on port ${port}`);
   });

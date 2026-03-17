@@ -10,9 +10,15 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# Singleton client — avoids creating a new connection on every call
+_client: Client | None = None
+
 
 def _get_client() -> Client:
-    return create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
+    global _client
+    if _client is None:
+        _client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
+    return _client
 
 
 async def upload_video(file_path: str, destination: str) -> str:

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "wandi-agent",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["main.py"],
+      "port": 8000
+    },
+    {
+      "name": "remotion-service",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "server/index.ts"],
+      "port": 3000
+    }
+  ]
+}

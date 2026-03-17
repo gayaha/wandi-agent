@@ -1,0 +1,232 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/generate-content",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "11a0158a-e3db-48f3-ba04-b95f9397fe7a",
+      "name": "Webhook",
+      "webhookId": "39679cdc-9033-4e78-a733-b6f9fff48e6e"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"client_id\": \"{{ $json.body.client_id }}\",\n  \"batch_type\": \"{{ $json.body.batch_type }}\"\n}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [220, 0],
+      "id": "97036155-3ac7-4f4b-b4f3-7116afcf15c2",
+      "name": "Generate Content"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/pick-video",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"user_id\": \"{{ $('Webhook').first().json.body.user_id || 'd063d37d-5e41-45cc-9963-92403a3a4ae1' }}\"\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [440, 0],
+      "id": "pick-video-node",
+      "name": "Pick Source Video"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-video-url",
+              "leftValue": "={{ $json.video_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 0],
+      "id": "check-video-node",
+      "name": "Has Video?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const generateResponse = $('Generate Content').first().json;\nconst videoUrl = $('Pick Source Video').first().json.video_url;\nconst webhookBody = $('Webhook').first().json.body;\n\nconst reels = generateResponse.reels || [];\n\nreturn reels.map(reel => ({\n  json: {\n    record_id: reel.record_id || '',\n    hook_text: reel.hook || '',\n    body_text: reel.text_on_video || '',\n    source_video_url: videoUrl,\n    text_direction: 'rtl',\n    client_id: webhookBody.client_id || ''\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, -80],
+      "id": "prepare-reels-node",
+      "name": "Prepare Render Jobs"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/render",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ \"record_id\": $json.record_id, \"hook_text\": $json.hook_text, \"body_text\": $json.body_text, \"source_video_url\": $json.source_video_url, \"text_direction\": $json.text_direction, \"client_id\": $json.client_id }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1100, -80],
+      "id": "render-request-node",
+      "name": "POST Render"
+    },
+    {
+      "parameters": {
+        "jsCode": "const generateResponse = $('Generate Content').first().json;\nconst renderResults = $('POST Render').all();\n\nconst renderJobs = renderResults.map(r => ({\n  job_id: r.json.job_id,\n  status: r.json.status\n}));\n\nreturn [{\n  json: {\n    ...generateResponse,\n    render_jobs: renderJobs,\n    render_count: renderJobs.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, -80],
+      "id": "build-response-node",
+      "name": "Build Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1540, -80],
+      "id": "respond-success-node",
+      "name": "Respond Success"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Generate Content').first().json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [880, 120],
+      "id": "respond-no-video-node",
+      "name": "Respond No Video"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Generate Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Content": {
+      "main": [
+        [
+          {
+            "node": "Pick Source Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Source Video": {
+      "main": [
+        [
+          {
+            "node": "Has Video?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Video?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Render Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond No Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Render Jobs": {
+      "main": [
+        [
+          {
+            "node": "POST Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST Render": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "c4cb9119360d687c8bc6d6ebf28df0c57ec1e990b6d1e51cf3fbab1e7e39d9b5"
+  }
+}

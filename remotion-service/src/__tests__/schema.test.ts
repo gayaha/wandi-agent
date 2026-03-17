@@ -55,7 +55,7 @@ describe("ReelInputSchema", () => {
   it("rejects durationInSeconds out of range (too high)", () => {
     const result = ReelInputSchema.safeParse({
       ...validInput,
-      durationInSeconds: 91,
+      durationInSeconds: 601,
     });
     expect(result.success).toBe(false);
   });

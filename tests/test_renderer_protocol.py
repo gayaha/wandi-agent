@@ -157,14 +157,14 @@ class TestRenderRequestValidation:
             )
 
     def test_render_request_rejects_duration_above_max(self):
-        """RenderRequest rejects duration_in_seconds above 90."""
+        """RenderRequest rejects duration_in_seconds above 600."""
         with pytest.raises(Exception):
             RenderRequest(
                 source_video_url="https://example.com/video.mp4",
                 hook_text="hook",
                 body_text="body",
                 record_id="rec123",
-                duration_in_seconds=91,
+                duration_in_seconds=601,
             )
 
 
