@@ -154,6 +154,10 @@ class GenerateRequest(BaseModel):
         description="Content batch type: חשיפה / מכירה / מעורב",
     )
     quantity: int = Field(default=10, ge=1, le=30, description="Number of reels to generate")
+    content_mix: dict[str, float] = Field(
+        default_factory=lambda: {"niche": 1.0},
+        description='Content category mix ratio, e.g. {"niche": 0.6, "personal brand": 0.4}',
+    )
 
 
 class GenerateAsyncRequest(BaseModel):
@@ -175,6 +179,10 @@ class GenerateAsyncRequest(BaseModel):
     content_sources: list[str] = Field(
         default_factory=list,
         description="Data sources to fetch: hooks, viral_pool, rtm_events, style_examples, insights. Empty = all.",
+    )
+    content_mix: dict[str, float] = Field(
+        default_factory=lambda: {"niche": 1.0},
+        description='Content category mix ratio, e.g. {"niche": 0.6, "personal brand": 0.4}',
     )
 
 
@@ -207,6 +215,7 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
             quantity=request.quantity,
             folders=request.folders,
             content_sources=request.content_sources or None,
+            content_mix=request.content_mix,
         )
 
         # Map reels to content_projects format
@@ -542,6 +551,7 @@ async def generate(request: GenerateRequest):
             client_id=request.client_id,
             batch_type=request.batch_type,
             quantity=request.quantity,
+            content_mix=request.content_mix,
         )
         return result
     except ValueError as e:
@@ -602,6 +612,84 @@ async def generate_async(request: GenerateAsyncRequest):
         "message": "Content generation started. Results will be sent to callback URL.",
     }
 
+
+# ── Agent endpoints ──────────────────────────────────────────────────────────
+
+class AgentChatRequest(BaseModel):
+    """Request model for the agentic chat endpoint."""
+    message: str = Field(..., description="User message in natural language (Hebrew)")
+    client_id: str = Field(..., description="Airtable record ID of the client (recXXX)")
+    session_id: str | None = Field(default=None, description="Session ID to continue an existing conversation")
+
+
+class AgentChatResponse(BaseModel):
+    """Response from the agent."""
+    session_id: str
+    response: str
+    steps: int
+    tools_used: list[str] = []
+    total_duration_ms: int = 0
+    error: bool = False
+
+
+@app.post("/agent/chat", response_model=AgentChatResponse)
+async def agent_chat(request: AgentChatRequest):
+    """Agentic chat — the LLM decides what tools to call.
+
+    Send a natural language message and the agent will:
+    1. Understand what you want
+    2. Pick the right tools (fetch data, generate content, etc.)
+    3. Execute them autonomously
+    4. Return a response with results
+    """
+    import agent_engine
+
+    logger.info(
+        f"[Agent Chat] message={request.message[:100]}..., "
+        f"client={request.client_id}, session={request.session_id}"
+    )
+
+    session = agent_engine.get_or_create_session(
+        client_id=request.client_id,
+        session_id=request.session_id,
+    )
+
+    try:
+        result = await agent_engine.run_agent(
+            user_message=request.message,
+            client_id=request.client_id,
+            session=session,
+        )
+        return AgentChatResponse(
+            session_id=result.session_id,
+            response=result.response,
+            steps=result.steps,
+            tools_used=[tc.tool_name for tc in result.tool_calls],
+            total_duration_ms=result.total_duration_ms,
+            error=result.error,
+        )
+    except Exception as e:
+        logger.exception(f"[Agent Chat] Failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Agent failed: {e}")
+
+
+@app.get("/agent/session/{session_id}")
+async def get_agent_session(session_id: str):
+    """Get the current state of an agent session."""
+    import agent_engine
+
+    session = agent_engine.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session.session_id,
+        "client_id": session.client_id,
+        "message_count": len(session.messages),
+        "tool_calls": len(session.tool_history),
+    }
+
+
+# ── Video endpoints ──────────────────────────────────────────────────────────
 
 class PickVideoRequest(BaseModel):
     user_id: str = Field(..., description="Supabase user UUID")

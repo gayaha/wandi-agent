@@ -144,28 +144,73 @@ async def get_magnets_for_client(client_id: str, client_name: str = "") -> list[
 # ── Viral Hooks ───────────────────────────────────────────────────────────────
 
 
-async def get_viral_hooks(client_id: str, client_name: str = "", limit: int = 25) -> list[dict[str, Any]]:
-    """Fetch viral hooks — filtered by client if tagged, otherwise fetch general (capped).
+async def get_viral_hooks(client_niche_ids: list[str], limit: int = 40) -> list[dict[str, Any]]:
+    """Fetch viral hooks filtered by niche record IDs.
 
-    The Viral Hooks table uses a "Clients" linked-record field (not "Client Name").
-    FIND/ARRAYJOIN doesn't work reliably on linked records, so we fetch all hooks
-    and filter in Python by checking if the client's record ID appears in the
-    Clients field (which Airtable returns as a list of record IDs).
+    The Viral Hooks table uses a "Relevant Niches" linked-record field
+    pointing to the `niche` table.  We fetch all hooks and filter in Python
+    by checking if any of the client's niche record IDs appear in the hook's
+    Relevant Niches field (which Airtable returns as a list of record IDs).
 
     Caps results to `limit` to avoid fetching 100+ hooks when only ~15 are used.
     """
     all_hooks = await _fetch_all(config.TABLE_VIRAL_HOOKS)
-    # Filter hooks where this client's record ID is in the Clients linked-record list
-    client_hooks = [
-        r for r in all_hooks
-        if client_id in (r.get("fields", {}).get("Clients") or [])
-    ]
-    if client_hooks:
-        logger.info(f"Found {len(client_hooks)} client-specific hooks for {client_id}")
-        return client_hooks[:limit]
-    # Fallback: no client-specific hooks, fetch capped sample
-    logger.info("No client-filtered hooks found, returning general hooks (capped)")
+
+    if not client_niche_ids:
+        logger.info("No niche IDs provided, returning all hooks (capped)")
+        return all_hooks[:limit]
+
+    niche_set = set(client_niche_ids)
+
+    def _hook_niche_ids(hook: dict) -> set[str]:
+        """Extract niche record IDs from a hook's Relevant Niches linked-record field.
+
+        Airtable returns linked records as [{"id": "recXXX", "name": "..."}].
+        """
+        raw = hook.get("fields", {}).get("Relevant Niches") or []
+        return {
+            item["id"] if isinstance(item, dict) else item
+            for item in raw
+        }
+
+    # Include hooks that match ANY of the client's niches,
+    # plus all hooks that have no niche (pure personal brand hooks).
+    niche_hooks = []
+    pb_only_hooks = []
+    for r in all_hooks:
+        hook_niches = _hook_niche_ids(r)
+        if niche_set & hook_niches:
+            niche_hooks.append(r)
+        elif not hook_niches:
+            # No niche → personal brand hook, include so PB filtering can use it
+            pb_only_hooks.append(r)
+
+    combined = niche_hooks + pb_only_hooks
+    if combined:
+        logger.info(
+            f"Found {len(niche_hooks)} niche-matched + {len(pb_only_hooks)} "
+            f"no-niche hooks (total: {len(combined)})"
+        )
+        return combined[:limit]
+
+    logger.info("No niche-filtered hooks found, returning all hooks (capped)")
     return all_hooks[:limit]
+
+
+async def get_niche_names(niche_ids: list[str]) -> dict[str, str]:
+    """Resolve niche record IDs to their display names.
+
+    Returns a dict of {record_id: niche_name}.
+    """
+    if not niche_ids:
+        return {}
+    all_niches = await _fetch_all("niche")
+    id_set = set(niche_ids)
+    return {
+        n["id"]: n.get("fields", {}).get("niche", "")
+        for n in all_niches
+        if n["id"] in id_set
+    }
 
 
 # ── Viral Content Pool ───────────────────────────────────────────────────────

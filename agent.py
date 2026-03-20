@@ -18,48 +18,9 @@ BATCH_TYPES = {"חשיפה", "מכירה", "מעורב"}
 # The AI model and the website may return English values, but Airtable
 # Select fields expect specific strings.  These maps ensure both sources
 # always produce the correct Airtable option.
-
-_HOOK_TYPE_MAP: dict[str, str] = {
-    # Hebrew pass-through
-    "שאלה מאתגרת": "שאלה מאתגרת",
-    "מספר + הבטחה": "מספר + הבטחה",
-    "טעות נפוצה": "טעות נפוצה",
-    "סוד חשיפה": "סוד חשיפה",
-    "זיהוי קהל": "זיהוי קהל",
-    "תוצאה מפתיעה": "תוצאה מפתיעה",
-    "פרובוקציה": "פרובוקציה",
-    # Hebrew variants the model may produce
-    "דעה לא פופולרית": "פרובוקציה",
-    # English variants the model / website may produce
-    "provocative": "פרובוקציה",
-    "provocation": "פרובוקציה",
-    "challenging question": "שאלה מאתגרת",
-    "challenging_question": "שאלה מאתגרת",
-    "number + promise": "מספר + הבטחה",
-    "number_plus_promise": "מספר + הבטחה",
-    "number plus promise": "מספר + הבטחה",
-    "common mistake": "טעות נפוצה",
-    "common_mistake": "טעות נפוצה",
-    "secret reveal": "סוד חשיפה",
-    "secret_reveal": "סוד חשיפה",
-    "audience identification": "זיהוי קהל",
-    "audience_identification": "זיהוי קהל",
-    "surprising result": "תוצאה מפתיעה",
-    "surprising_result": "תוצאה מפתיעה",
-    "call to action": "פרובוקציה",
-    "call_to_action": "פרובוקציה",
-    "cta": "פרובוקציה",
-    # Irrelevant types → map to closest valid type
-    "unpopular opinion": "פרובוקציה",
-    "unpopular_opinion": "פרובוקציה",
-    "talking_head": "פרובוקציה",
-    "talking head": "פרובוקציה",
-}
-
-_VALID_HOOK_TYPES: set[str] = {
-    "שאלה מאתגרת", "מספר + הבטחה", "טעות נפוצה", "סוד חשיפה",
-    "זיהוי קהל", "תוצאה מפתיעה", "פרובוקציה",
-}
+#
+# Hook Types are now dynamic — whatever exists in Airtable is accepted.
+# No hardcoded _VALID_HOOK_TYPES or _HOOK_TYPE_MAP needed.
 
 _CONTENT_TYPE_AIRTABLE: dict[str, str] = {
     "חשיפה": "חשיפה",
@@ -88,13 +49,6 @@ _AWARENESS_MAP: dict[str, str] = {
     "מודעות לפתרון": "Solution-Aware",
     "מודע לפתרון": "Solution-Aware",
     "מודעת לפתרון": "Solution-Aware",
-}
-
-# Recommended hook types per awareness stage (for validation — not strict rejection)
-_STAGE_HOOK_TYPES: dict[str, set[str]] = {
-    "Unaware": {"פרובוקציה", "תוצאה מפתיעה", "שאלה מאתגרת"},
-    "Problem-Aware": {"טעות נפוצה", "זיהוי קהל", "שאלה מאתגרת", "מספר + הבטחה"},
-    "Solution-Aware": {"סוד חשיפה", "מספר + הבטחה", "תוצאה מפתיעה"},
 }
 
 # Stage → required content_type
@@ -274,14 +228,12 @@ def _validate_and_fix_reel(
     elif stage == "Solution-Aware":
         if not magnet_id or magnet_id not in valid_magnet_ids:
             if valid_magnet_ids:
-                fallback = next(iter(valid_magnet_ids))
-                logger.warning(f"[Validation] {tag}: Solution-Aware missing/invalid magnet → assigned '{fallback}'")
-                reel["magnet_id"] = fallback
+                logger.warning(f"[Validation] {tag}: Solution-Aware missing/invalid magnet → no auto-assign, downgrading to Problem-Aware")
             else:
                 logger.warning(f"[Validation] {tag}: Solution-Aware but no magnets available → downgrading to Problem-Aware")
-                reel["awareness_stage"] = "Problem-Aware"
-                reel["content_type"] = "חשיפה"
-                reel["magnet_id"] = None
+            reel["awareness_stage"] = "Problem-Aware"
+            reel["content_type"] = "חשיפה"
+            reel["magnet_id"] = None
     elif stage == "Problem-Aware":
         if magnet_id and magnet_id not in valid_magnet_ids:
             logger.warning(f"[Validation] {tag}: Problem-Aware had invalid magnet_id '{magnet_id}' → removed")
@@ -297,15 +249,12 @@ def _validate_and_fix_reel(
                 logger.warning(f"[Validation] {tag}: missing trigger word '{trigger}' — appending CTA")
                 reel["caption"] = caption.rstrip() + f"\n\nתגיבו '{trigger}' ותקבלו את זה בהודעה 👇"
 
-    # 4. Validate and normalize hook_type
-    raw_ht = _normalize(reel.get("hook_type") or "", _HOOK_TYPE_MAP)
-    if raw_ht not in _VALID_HOOK_TYPES:
-        recommended = _STAGE_HOOK_TYPES.get(reel["awareness_stage"], set())
-        fallback_ht = next(iter(recommended)) if recommended else "שאלה מאתגרת"
-        logger.warning(f"[Validation] {tag}: invalid hook_type '{raw_ht}' → fixed to '{fallback_ht}'")
-        reel["hook_type"] = fallback_ht
-    else:
-        reel["hook_type"] = raw_ht
+    # 4. Hook type — accept any non-empty value (dynamic from Airtable)
+    raw_ht = (reel.get("hook_type") or "").strip().strip('"').strip("'").strip()
+    if not raw_ht:
+        raw_ht = "כללי"
+        logger.warning(f"[Validation] {tag}: empty hook_type → defaulting to 'כללי'")
+    reel["hook_type"] = raw_ht
 
     # 5. Unaware → hook_only (text_on_video should be null)
     if reel["awareness_stage"] == "Unaware" and reel.get("text_on_video"):
@@ -379,6 +328,7 @@ def _decide_distribution(
 async def _fetch_all_data(
     client_id: str, niche: str, client_name: str = "",
     content_sources: list[str] | None = None,
+    client_niche_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Fetch required data from Airtable concurrently.
 
@@ -388,6 +338,7 @@ async def _fetch_all_data(
             "style_examples", "insights".
             Magnets + recent_hooks are always fetched.
             Empty/None = fetch everything.
+        client_niche_ids: Record IDs from the niche table for hook filtering.
     """
     # Magnets + recent_hooks are always needed
     tasks: dict[str, Any] = {
@@ -398,7 +349,7 @@ async def _fetch_all_data(
     # Conditionally add other sources
     fetch_all = not content_sources
     if fetch_all or "hooks" in content_sources:
-        tasks["hooks"] = at.get_viral_hooks(client_id, client_name=client_name)
+        tasks["hooks"] = at.get_viral_hooks(client_niche_ids or [])
     if fetch_all or "viral_pool" in content_sources:
         tasks["viral_pool"] = at.get_viral_content_pool(niche)
     if fetch_all or "rtm_events" in content_sources:
@@ -439,7 +390,7 @@ def _build_queue_record(
     record: dict[str, Any] = {
         "Client": [client_id],
         "Hook": reel.get("hook") or "",
-        "Hook Type": _normalize(reel.get("hook_type") or "", _HOOK_TYPE_MAP),
+        "Hook Type": (reel.get("hook_type") or "כללי").strip(),
         "text on video": reel.get("text_on_video") or "",
         "Caption": reel.get("caption") or "",
         "Content Type": _normalize(reel.get("content_type") or "", _CONTENT_TYPE_AIRTABLE),
@@ -459,15 +410,21 @@ async def generate_reels(
     client_id: str, batch_type: str, quantity: int = 10,
     folders: dict[str, str] | None = None,
     content_sources: list[str] | None = None,
+    content_mix: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Main generation pipeline.
 
     1. Fetch client + all related data from Airtable
-    2. Decide content distribution
+    2. Decide content distribution (stage + content category)
     3. Generate reels via Ollama
     4. Validate and fix each reel
     5. Save to Content Queue
     6. Return results
+
+    Args:
+        content_mix: Ratio of content categories.
+            e.g. ``{"niche": 0.6, "personal brand": 0.4}``
+            Default: all niche (professional).
     """
     if batch_type not in BATCH_TYPES:
         raise ValueError(f"Invalid batch_type '{batch_type}'. Must be one of: {BATCH_TYPES}")
@@ -482,18 +439,30 @@ async def generate_reels(
     client_name = (client_fields.get("Client Name") or "").strip()
     business_info = client_fields.get("Business Info", "")
     tone_of_voice = client_fields.get("Tone Of Voice", "")
-    niche_raw = client_fields.get("Niche", "")
-    niche = niche_raw[0] if isinstance(niche_raw, list) and niche_raw else niche_raw
     ig_username = client_fields.get("ig_username", "")
     client_knowledge = client_fields.get("Client Knowledge", "")
 
-    if not niche:
-        logger.warning(f"Client {client_id} has no Niche defined — defaulting to 'כללי'")
-        niche = "כללי"
+    # Niche is now multipleRecordLinks → list of record IDs
+    client_niche_ids: list[str] = client_fields.get("Niche") or []
+    # Resolve niche names for display in prompts
+    niche_names_map = await at.get_niche_names(client_niche_ids)
+    niche_display = ", ".join(niche_names_map.values()) if niche_names_map else "כללי"
+
+    if not client_niche_ids:
+        logger.warning(f"Client {client_id} has no Niche defined")
+
+    # Extract personal brand tags for PB hook matching
+    personal_brand_tags: list[str] = [
+        t.get("name", "") if isinstance(t, dict) else str(t)
+        for t in (client_fields.get("Personal Brand Tags") or [])
+    ]
 
     # Step 1b: Fetch all related data concurrently
-    logger.info(f"Fetching data for niche '{niche}'...")
-    data = await _fetch_all_data(client_id, niche, client_name=client_name, content_sources=content_sources)
+    logger.info(f"Fetching data for niches: {niche_display}...")
+    data = await _fetch_all_data(
+        client_id, niche_display, client_name=client_name,
+        content_sources=content_sources, client_niche_ids=client_niche_ids,
+    )
 
     # Step 2: Decide distribution
     distribution = _decide_distribution(batch_type, quantity, data["magnets"])
@@ -502,22 +471,38 @@ async def generate_reels(
     # Step 3: Generate via Ollama — one reel per call to avoid model degradation
     logger.info(f"Generating {quantity} reels via Ollama (one per call)...")
 
-    # Build the reel list from distribution: e.g. {Unaware: 2, Problem-Aware: 1} → [Unaware, Unaware, Problem-Aware]
-    stage_sequence: list[str] = []
+    # Build stage sequence with content category
+    # Default: all niche (professional)
+    mix = content_mix or {"niche": 1.0}
+
+    stage_sequence: list[tuple[str, str]] = []  # (stage, content_category)
     for stage, count in distribution.items():
-        stage_sequence.extend([stage] * count)
+        # Split this stage's count by content_mix ratio
+        remaining = count
+        for category, ratio in mix.items():
+            cat_count = max(0, round(count * ratio))
+            cat_count = min(cat_count, remaining)  # don't exceed stage total
+            stage_sequence.extend([(stage, category)] * cat_count)
+            remaining -= cat_count
+        # Any rounding remainder goes to the first category
+        if remaining > 0:
+            first_cat = next(iter(mix))
+            stage_sequence.extend([(stage, first_cat)] * remaining)
+
+    # Trim to exact quantity (rounding may overshoot)
+    stage_sequence = stage_sequence[:quantity]
 
     # Track hooks generated so far to pass as recent_hooks for dedup
     all_recent = list(data["recent_hooks"])
     generated_reels: list[dict] = []
 
-    for reel_idx, stage in enumerate(stage_sequence):
+    for reel_idx, (stage, category) in enumerate(stage_sequence):
         prompt = prompts.build_single_reel_prompt(
             awareness_stage=stage,
             client_name=client_name,
             business_info=business_info,
             tone_of_voice=tone_of_voice,
-            niche=niche,
+            niche=niche_display,
             ig_username=ig_username,
             client_knowledge=client_knowledge,
             magnets=data["magnets"],
@@ -528,6 +513,8 @@ async def generate_reels(
             folders=folders,
             recent_hooks=all_recent,
             reel_index=reel_idx,
+            content_category=category,
+            personal_brand_tags=personal_brand_tags,
         )
 
         max_attempts = 2

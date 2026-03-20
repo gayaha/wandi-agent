@@ -21,6 +21,7 @@ TABLE_GLOBAL_INSIGHTS = "Global Insights"
 # Ollama
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "glm4:latest")
+OLLAMA_AGENT_MODEL = os.getenv("OLLAMA_AGENT_MODEL", "")  # Tool-calling model (e.g. qwen2.5:32b). Falls back to OLLAMA_MODEL if empty.
 
 # Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")

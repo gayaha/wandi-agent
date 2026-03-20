@@ -2,15 +2,42 @@
 
 import logging
 import random
+import re
 
 logger = logging.getLogger(__name__)
 
-# Hook types recommended per awareness stage (used for filtering)
-STAGE_HOOK_TYPES: dict[str, set[str]] = {
-    "Unaware": {"פרובוקציה", "תוצאה מפתיעה", "שאלה מאתגרת"},
-    "Problem-Aware": {"טעות נפוצה", "זיהוי קהל", "שאלה מאתגרת", "מספר + הבטחה"},
-    "Solution-Aware": {"סוד חשיפה", "מספר + הבטחה", "תוצאה מפתיעה"},
-}
+# ── Airtable field helpers ────────────────────────────────────────────────────
+
+
+def _get_select_name(val) -> str:
+    """Extract name from a singleSelect value (may be dict or str)."""
+    if isinstance(val, dict):
+        return val.get("name", "")
+    return str(val) if val else ""
+
+
+def _get_multi_select_names(record: dict, field: str) -> set[str]:
+    """Extract set of names from a multipleSelects field on a record."""
+    values = record.get("fields", {}).get(field) or []
+    return {_get_select_name(v) for v in values}
+
+
+def _extract_hook_text(fields: dict) -> str:
+    """Extract and clean hook text from various Airtable field name variants."""
+    text = (
+        fields.get("translated hook", "")
+        or fields.get("Hook Text", "")
+        or fields.get("hook", "")
+        or fields.get("Hook", "")
+    )
+    if not text:
+        return ""
+    for prefix in ("**טקסט בעברית (בסגנון אינסטגרם):**", "**טקסט בעברית:**"):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+    text = text.strip().strip('"').strip()
+    # Take only the first line (the actual hook)
+    return text.split("\n")[0].strip()
 
 # ── System Prompt ────────────────────────────────────────────────────────────
 
@@ -39,6 +66,35 @@ SYSTEM_PROMPT = """אתה קופירייטר ישראלי מומחה ליציר�
 - awareness_stage: Unaware / Problem-Aware / Solution-Aware"""
 
 FULL_SYSTEM_PROMPT = SYSTEM_PROMPT
+
+# ── Agent System Prompt (for tool-calling agent mode) ────────────────────────
+
+AGENT_SYSTEM_PROMPT = """את וונדי — עוזרת AI לבעלות עסקים ישראליות שמייצרת תוכן לאינסטגרם בשיטת SDMF.
+
+את עובדת בצורה אוטונומית: מקבלת בקשה מהמשתמשת, מחליטה אילו כלים להפעיל, ומבצעת את המשימה.
+
+## איך לעבוד:
+1. **תמיד תתחילי** עם get_client_profile כדי להבין מי הלקוחה
+2. **חשבי** לפני כל פעולה — מה המשתמשת רוצה? אילו כלים צריך?
+3. **בצעי** את הכלים בסדר הגיוני
+4. **סכמי** בסוף — ספרי למשתמשת מה עשית ומה התוצאה
+
+## כללי SDMF (חובה!):
+- Unaware = חשיפה. אסור מגנט. רק הוק ויראלי.
+- Problem-Aware = ערך. מגנט אופציונלי.
+- Solution-Aware = מכירה. חובה מגנט עם טריגר.
+
+## כללים:
+- ענה תמיד בעברית
+- אל תמציא מידע — תמיד השתמש בכלים לשלוף נתונים
+- אם משהו נכשל — ספר למשתמשת ותציע חלופה
+- היי ישירה, חמה, ומקצועית
+
+## דוגמאות:
+- "תייצרי 5 רילסים חשיפה" → get_client_profile → generate_batch(batch_type="חשיפה", quantity=5)
+- "מה עובד הכי טוב אצלי?" → get_client_profile → get_insights
+- "תייצרי רילס מכירה" → get_client_profile → get_magnets → generate_reel(awareness_stage="Solution-Aware")
+- "רילס אחד Problem-Aware" → get_client_profile → generate_reel(awareness_stage="Problem-Aware")"""
 
 # ── Constant Prompt Sections ─────────────────────────────────────────────────
 
@@ -184,58 +240,80 @@ def format_style_examples(examples: list[dict]) -> str:
 def format_hooks(
     hooks: list[dict],
     limit: int = 15,
-    awareness_stages: set[str] | None = None,
+    awareness_stage: str | None = None,
+    content_category: str | None = None,
+    personal_brand_tags: list[str] | None = None,
 ) -> str:
-    """Format viral hooks for prompt insertion, grouped by hook type.
+    """Format viral hooks for prompt insertion with 3-layer filtering.
 
-    Hooks are filtered by relevance to the requested awareness stages,
-    then grouped by hook type for the LLM to easily select and adapt.
+    Filtering layers (each with >= 3 fallback):
+    1. Awareness Stage — from hook's ``Awareness Stage`` multipleSelects
+    2. Content Category — from hook's ``Personal brand\\niche`` field
+       (``"personal brand"`` or ``"niche"``)
+    3. Personal Brand Tags — for PB content, rank by tag overlap with client
+
+    After filtering, hooks are grouped by Hook Type for diversity.
+    Hook Types are dynamic — whatever exists in Airtable is accepted.
     """
     if not hooks:
         return ""
 
-    pool = hooks
+    pool = list(hooks)
 
-    # Filter by relevant hook types for the requested stages
-    if awareness_stages:
-        relevant_types: set[str] = set()
-        for stage in awareness_stages:
-            relevant_types.update(STAGE_HOOK_TYPES.get(stage, set()))
-
+    # Layer 1: Filter by Awareness Stage (multipleSelects on hook)
+    if awareness_stage:
         filtered = [
-            h for h in hooks
-            if h.get("fields", {}).get("Hook Type", "") in relevant_types
+            h for h in pool
+            if awareness_stage in _get_multi_select_names(h, "Awareness Stage")
         ]
-        # Fallback if too few results
         if len(filtered) >= 3:
             pool = filtered
+        else:
+            logger.info(
+                f"Only {len(filtered)} hooks for stage {awareness_stage}, "
+                f"using full pool ({len(pool)})"
+            )
 
-    # Randomize for variety across runs
-    shuffled = list(pool)
-    random.shuffle(shuffled)
+    # Layer 2: Filter by Content Category (field: "Personal brand\niche")
+    if content_category:
+        filtered = [
+            h for h in pool
+            if content_category in _get_multi_select_names(h, r"Personal brand\niche")
+        ]
+        if len(filtered) >= 3:
+            pool = filtered
+        else:
+            logger.info(
+                f"Only {len(filtered)} hooks for category '{content_category}', "
+                f"using broader pool ({len(pool)})"
+            )
 
-    # Group by hook type for better organization
+    # Layer 3: For personal brand, rank by tag overlap with client
+    if content_category == "personal brand" and personal_brand_tags:
+        client_tags = set(personal_brand_tags)
+        scored = []
+        for h in pool:
+            hook_tags = _get_multi_select_names(h, "Personal brand tags")
+            overlap = len(client_tags & hook_tags)
+            if overlap > 0:
+                scored.append((overlap, h))
+        if len(scored) >= 3:
+            scored.sort(key=lambda x: -x[0])
+            pool = [h for _, h in scored]
+        elif scored:
+            logger.info(
+                f"Only {len(scored)} PB-tag-matched hooks, using broader pool"
+            )
+
+    # Diversify by Hook Type (dynamic — any type from Airtable)
+    random.shuffle(pool)
     by_type: dict[str, list[str]] = {}
-    for h in shuffled[:limit]:
+    for h in pool[:limit]:
         f = h.get("fields", {})
-        ht = f.get("Hook Type", "כללי")
-        # Try multiple field names — Airtable column may vary
-        text = (
-            f.get("translated hook", "")
-            or f.get("Hook Text", "")
-            or f.get("hook", "")
-            or f.get("Hook", "")
-        )
+        ht = _get_select_name(f.get("Hook Type")) or "כללי"
+        text = _extract_hook_text(f)
         if text:
-            # Strip common LLM-generated prefixes from translated hooks
-            for prefix in ("**טקסט בעברית (בסגנון אינסטגרם):**", "**טקסט בעברית:**"):
-                if text.startswith(prefix):
-                    text = text[len(prefix):]
-            text = text.strip().strip('"').strip()
-            # Take only the first line (the actual hook)
-            text = text.split("\n")[0].strip()
-            if text:
-                by_type.setdefault(ht, []).append(text)
+            by_type.setdefault(ht, []).append(text)
 
     lines = []
     for hook_type, examples in by_type.items():
@@ -421,7 +499,7 @@ def build_generation_prompt(
         sections.append(_section("דוגמאות סגנון מהלקוח (טופ ביצועים)", style_text))
 
     # Conditional: hooks with adaptation instructions
-    hooks_text = format_hooks(hooks, awareness_stages=set(distribution.keys()))
+    hooks_text = format_hooks(hooks)
     if hooks_text:
         sections.append(_section(
             "הוקים ויראליים — בחר הוק, התאם אותו לנישה של הלקוח",
@@ -472,7 +550,7 @@ def _stage_instructions(stage: str) -> str:
         return (
             "שלב: Unaware — חשיפה בלבד.\n"
             "מטרה: לעצור סקרול. הצופה לא מכיר אותך.\n"
-            "הוקים מתאימים: פרובוקציה / תוצאה מפתיעה / שאלה מאתגרת\n"
+            "בחר הוק מהרשימה למטה — הם כבר מסוננים לשלב הזה.\n"
             "content_type: חשיפה | magnet_id: null | text_on_video: null (hook_only)\n"
             "CTA בקפשן: עקבו / שמרו / שתפו — בלי מגנט!"
         )
@@ -480,7 +558,7 @@ def _stage_instructions(stage: str) -> str:
         return (
             "שלב: Problem-Aware — תוכן ערכי.\n"
             "מטרה: לתת שם לכאב. להראות שמבינים.\n"
-            "הוקים מתאימים: טעות נפוצה / זיהוי קהל / שאלה מאתגרת / מספר + הבטחה\n"
+            "בחר הוק מהרשימה למטה — הם כבר מסוננים לשלב הזה.\n"
             "content_type: חשיפה | magnet_id: null (אלא אם יש מגנט חשיפה)\n"
             "text_on_video: 3-5 שורות ערכיות\n"
             "CTA בקפשן: שמרו / תייגו / כתבו בתגובות"
@@ -488,7 +566,7 @@ def _stage_instructions(stage: str) -> str:
     return (
         "שלב: Solution-Aware — מכירה עם מגנט.\n"
         "מטרה: להציג פתרון ולהפנות למגנט.\n"
-        "הוקים מתאימים: סוד חשיפה / מספר + הבטחה / תוצאה מפתיעה\n"
+        "בחר הוק מהרשימה למטה — הם כבר מסוננים לשלב הזה.\n"
         "content_type: מכירה | magnet_id: חובה! בחר מהרשימה\n"
         "text_on_video: 3-5 שורות שמסבירות את הפתרון\n"
         "CTA בקפשן: חובה מילת טריגר מדויקת של המגנט"
@@ -512,11 +590,17 @@ def build_single_reel_prompt(
     folders: dict[str, str] | None = None,
     recent_hooks: list[str] | None = None,
     reel_index: int = 0,
+    content_category: str | None = None,
+    personal_brand_tags: list[str] | None = None,
 ) -> str:
     """Build a compact prompt for generating a single reel.
 
     Targets < 6K chars by including only the essentials for one reel
     at a specific awareness_stage.
+
+    Args:
+        content_category: "personal brand" or "niche" — controls hook filtering.
+        personal_brand_tags: Client's PB tags for matching PB hooks.
     """
     sections: list[str] = []
 
@@ -529,14 +613,17 @@ def build_single_reel_prompt(
 
     # Compact client profile
     sections.append(
-        f"לקוח: {client_name} | נישה: {niche} | @{ig_username}\n"
-        f"עסק: {business_info}\n"
-        f"טון: {tone_of_voice}"
+        f"לקוח: {client_name} | נישה: {niche} | @{ig_username}"
     )
 
     # Client knowledge (trimmed)
     if client_knowledge and client_knowledge.strip():
-        trimmed = client_knowledge.strip()[:800]
+        trimmed = re.sub(
+            r'## SDMF Methodology.*?(?=##|\Z)',
+            '',
+            client_knowledge.strip(),
+            flags=re.DOTALL
+        ).strip()
         sections.append(f"ידע על הלקוח:\n{trimmed}")
 
     # Stage-specific instructions
@@ -544,12 +631,22 @@ def build_single_reel_prompt(
 
     # Magnets — only for Solution-Aware or Problem-Aware
     if awareness_stage in ("Solution-Aware", "Problem-Aware"):
-        magnets_text = format_magnets(magnets)
+        relevant_magnets = [
+            m for m in magnets
+            if awareness_stage in _get_multi_select_names(m, "Awareness Stage")
+        ]
+        magnets_text = format_magnets(relevant_magnets)
         if magnets_text:
             sections.append(f"מגנטים זמינים:\n{magnets_text}")
 
-    # Hooks — filtered for this stage, compact
-    stage_hooks = format_hooks(hooks, limit=10, awareness_stages={awareness_stage})
+    # Hooks — filtered by stage, content category, and PB tags
+    stage_hooks = format_hooks(
+        hooks,
+        limit=10,
+        awareness_stage=awareness_stage,
+        content_category=content_category,
+        personal_brand_tags=personal_brand_tags,
+    )
     if stage_hooks:
         sections.append(f"הוקים לבחירה:\n{stage_hooks}")
 
@@ -579,9 +676,7 @@ def build_single_reel_prompt(
     if recent_hooks:
         recent_list = "\n".join(f"- {h}" for h in recent_hooks)
         sections.append(
-            "הוקים שכבר נוצרו — אל תחזור עליהם:\n"
-            f"{recent_list}\n\n"
-            "הוק זה חייב להיות שונה לגמרי מהאלה:\n"
+            "הוקים שכבר נוצרו — אל תחזור עליהם! צור הוקים שונים לגמרי:\n"
             f"{recent_list}\n"
             "שונה = נושא שונה, פתיחה שונה, מבנה שונה."
         )

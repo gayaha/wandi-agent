@@ -260,6 +260,67 @@ async def generate_json(prompt: str, system: str | None = None) -> Any:
     raise ValueError(f"Could not parse JSON from model response: {raw[:200]}")
 
 
+async def chat(
+    messages: list[dict[str, Any]],
+    model: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    system: str | None = None,
+) -> dict[str, Any]:
+    """Chat completion with optional tool calling via /api/chat.
+
+    This is the core method for the agent engine — it sends a conversation
+    with tool definitions and returns the model's response, which may include
+    tool_calls that the agent loop should execute.
+
+    Returns a dict with:
+      - content: str (the model's text response, may be empty if tool call)
+      - tool_calls: list[dict] | None (tool calls the model wants to make)
+    """
+    resolved_model = model or config.OLLAMA_AGENT_MODEL or config.OLLAMA_MODEL
+
+    payload: dict[str, Any] = {
+        "model": resolved_model,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "temperature": 0.3,  # Lower temp for tool-calling decisions
+            "num_predict": 4096,
+        },
+    }
+    if system:
+        # Prepend system message
+        payload["messages"] = [{"role": "system", "content": system}] + payload["messages"]
+    if tools:
+        payload["tools"] = tools
+
+    logger.info(
+        f"Calling Ollama chat ({resolved_model}) — "
+        f"{len(messages)} messages, {len(tools or [])} tools"
+    )
+
+    async with httpx.AsyncClient(timeout=300) as client:
+        resp = await client.post(
+            f"{config.OLLAMA_BASE_URL}/api/chat",
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    message = data.get("message", {})
+    content = message.get("content", "")
+    tool_calls = message.get("tool_calls")
+
+    logger.info(
+        f"Ollama chat response: content={len(content)} chars, "
+        f"tool_calls={len(tool_calls) if tool_calls else 0}"
+    )
+
+    return {
+        "content": content,
+        "tool_calls": tool_calls,
+    }
+
+
 async def check_health() -> bool:
     """Check if Ollama is reachable."""
     try:
