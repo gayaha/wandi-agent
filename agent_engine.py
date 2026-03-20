@@ -3,16 +3,20 @@
 This replaces the hardcoded pipeline with a dynamic agent loop where
 the LLM (via Ollama tool calling) decides which tools to invoke,
 observes results, and iterates until the task is complete.
+
+Sessions are persisted to Supabase via session_store.py.
+In-memory message list is used during the agent loop for LLM context,
+then saved to Supabase after each interaction.
 """
 
 import json
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 import ollama_client as ollama
+import session_store
 import tool_registry
 
 logger = logging.getLogger(__name__)
@@ -40,61 +44,28 @@ class AgentResult:
     total_duration_ms: int = 0
 
 
-@dataclass
-class AgentSession:
-    """Lightweight in-memory session for agent conversations.
+# ── Session Management (Supabase-backed) ─────────────────────────────────────
 
-    Future: persist to Supabase for cross-request continuity.
+
+async def get_or_create_session(
+    user_id: str, client_id: str, session_id: str | None = None
+) -> dict:
+    """Get existing session or create a new one in Supabase.
+
+    Returns a session dict with keys: id, user_id, client_id, title, status.
     """
-    session_id: str
-    client_id: str
-    messages: list[dict[str, Any]] = field(default_factory=list)
-    tool_history: list[ToolCall] = field(default_factory=list)
-    created_at: float = field(default_factory=time.time)
+    if session_id:
+        existing = await session_store.get_session(session_id)
+        if existing:
+            return existing
 
-    def add_user_message(self, content: str) -> None:
-        self.messages.append({"role": "user", "content": content})
-
-    def add_assistant_message(self, content: str) -> None:
-        self.messages.append({"role": "assistant", "content": content})
-
-    def add_tool_call_message(self, tool_calls: list[dict]) -> None:
-        """Add the assistant's tool call request to history."""
-        self.messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": tool_calls,
-        })
-
-    def add_tool_result(self, tool_name: str, result: Any) -> None:
-        """Add a tool execution result to the conversation."""
-        self.messages.append({
-            "role": "tool",
-            "content": json.dumps(result, ensure_ascii=False, default=str),
-        })
+    # Create new session
+    return await session_store.create_session(user_id, client_id)
 
 
-# ── Session Store (in-memory for now) ───────────────────────────────────────
-
-_sessions: dict[str, AgentSession] = {}
-
-
-def get_or_create_session(
-    client_id: str, session_id: str | None = None
-) -> AgentSession:
-    """Get existing session or create a new one."""
-    if session_id and session_id in _sessions:
-        return _sessions[session_id]
-
-    new_id = session_id or str(uuid.uuid4())
-    session = AgentSession(session_id=new_id, client_id=client_id)
-    _sessions[new_id] = session
-    return session
-
-
-def get_session(session_id: str) -> AgentSession | None:
-    """Get an existing session by ID."""
-    return _sessions.get(session_id)
+async def get_session(session_id: str) -> dict | None:
+    """Get an existing session by ID from Supabase."""
+    return await session_store.get_session(session_id)
 
 
 # ── Agent Loop ──────────────────────────────────────────────────────────────
@@ -103,25 +74,26 @@ def get_session(session_id: str) -> AgentSession | None:
 async def run_agent(
     user_message: str,
     client_id: str,
-    session: AgentSession | None = None,
+    session: dict,
     system_prompt: str | None = None,
 ) -> AgentResult:
     """Run the agent loop — LLM decides what tools to call.
 
     Flow:
-    1. User message is added to conversation
-    2. LLM sees conversation + available tools → decides next action
-    3. If tool_calls → execute tools, add results, go to step 2
-    4. If no tool_calls → LLM is done, return response to user
+    1. Load conversation history from Supabase
+    2. User message is added to conversation
+    3. LLM sees conversation + available tools → decides next action
+    4. If tool_calls → execute tools, add results, go to step 3
+    5. If no tool_calls → LLM is done, return response to user
+    6. All messages are saved to Supabase
 
     Args:
         user_message: The user's request in natural language.
         client_id: Airtable client record ID for context.
-        session: Optional existing session to continue conversation.
+        session: Session dict from get_or_create_session().
         system_prompt: Optional custom system prompt override.
     """
-    if session is None:
-        session = get_or_create_session(client_id)
+    session_id = session["id"]
 
     # Use the agent system prompt from prompts.py, with client context injected
     if system_prompt is None:
@@ -133,7 +105,28 @@ async def run_agent(
             f"השתמשי ב-client_id הזה בכל קריאה לכלים שדורשים אותו."
         )
 
-    session.add_user_message(user_message)
+    # Load previous messages from Supabase for conversation continuity
+    stored_messages = await session_store.get_messages(session_id)
+    messages: list[dict[str, Any]] = []
+    for msg in stored_messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        entry: dict[str, Any] = {"role": role, "content": content}
+        # Reconstruct tool_calls for assistant messages that triggered tools
+        if role == "assistant" and msg.get("tool_name"):
+            entry["tool_calls"] = [{
+                "function": {
+                    "name": msg["tool_name"],
+                    "arguments": msg.get("tool_args", {}),
+                }
+            }]
+        messages.append(entry)
+
+    # Add the new user message
+    messages.append({"role": "user", "content": user_message})
+
+    # Persist user message to Supabase
+    await session_store.save_message(session_id, "user", user_message)
 
     tool_schemas = tool_registry.get_all_tool_schemas()
     all_tool_calls: list[ToolCall] = []
@@ -144,7 +137,7 @@ async def run_agent(
 
         # Ask the LLM what to do next
         response = await ollama.chat(
-            messages=session.messages,
+            messages=messages,
             tools=tool_schemas,
             system=system_prompt,
         )
@@ -154,23 +147,33 @@ async def run_agent(
 
         # If no tool calls — the agent is done thinking and wants to respond
         if not tool_calls:
-            if content:
-                session.add_assistant_message(content)
             total_ms = int((time.time() - start_time) * 1000)
+            final_response = content or "סיימתי את המשימה."
+
+            # Persist assistant response to Supabase
+            await session_store.save_message(
+                session_id, "assistant", final_response,
+                duration_ms=total_ms,
+            )
+
             logger.info(
                 f"[Agent] Done after {step + 1} steps, "
                 f"{len(all_tool_calls)} tool calls, {total_ms}ms"
             )
             return AgentResult(
-                session_id=session.session_id,
-                response=content or "סיימתי את המשימה.",
+                session_id=session_id,
+                response=final_response,
                 steps=step + 1,
                 tool_calls=all_tool_calls,
                 total_duration_ms=total_ms,
             )
 
         # The LLM wants to call tools — execute each one
-        session.add_tool_call_message(tool_calls)
+        messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": tool_calls,
+        })
 
         for tc in tool_calls:
             fn = tc.get("function", {})
@@ -190,10 +193,19 @@ async def run_agent(
                 duration_ms=tool_duration,
             )
             all_tool_calls.append(tool_call_record)
-            session.tool_history.append(tool_call_record)
 
-            # Add tool result to conversation so LLM can see it
-            session.add_tool_result(tool_name, result)
+            # Add tool result to in-memory conversation for LLM context
+            tool_result_str = json.dumps(result, ensure_ascii=False, default=str)
+            messages.append({"role": "tool", "content": tool_result_str})
+
+            # Persist tool call to Supabase
+            await session_store.save_message(
+                session_id, "tool", tool_result_str,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                tool_result=result,
+                duration_ms=tool_duration,
+            )
 
             logger.info(
                 f"[Agent] Tool {tool_name} completed in {tool_duration}ms"
@@ -202,11 +214,15 @@ async def run_agent(
     # Safety limit reached
     total_ms = int((time.time() - start_time) * 1000)
     error_msg = f"הגעתי למגבלת הצעדים ({MAX_AGENT_STEPS}). המשימה לא הושלמה."
-    session.add_assistant_message(error_msg)
+
+    # Persist error message
+    await session_store.save_message(
+        session_id, "assistant", error_msg, duration_ms=total_ms,
+    )
 
     logger.warning(f"[Agent] Hit step limit after {MAX_AGENT_STEPS} steps")
     return AgentResult(
-        session_id=session.session_id,
+        session_id=session_id,
         response=error_msg,
         steps=MAX_AGENT_STEPS,
         tool_calls=all_tool_calls,

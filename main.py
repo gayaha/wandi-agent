@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -17,7 +17,10 @@ import agent
 import airtable_client as at
 import config
 import ollama_client as ollama
+import quota as quota_module
+import session_store
 import supabase_client
+import user_resolver
 import video_picker
 from renderer import get_renderer, RenderRequest, JobStatus, BrandConfig
 from renderer.brand import resolve_brand_for_render
@@ -613,13 +616,36 @@ async def generate_async(request: GenerateAsyncRequest):
     }
 
 
+# ── Auth middleware ──────────────────────────────────────────────────────────
+
+
+async def get_current_user(authorization: str = Header(default="")) -> dict:
+    """Validate Supabase JWT from Authorization header.
+
+    Returns {"user_id": str, "email": str}.
+    Raises 401 if token is invalid or missing.
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    token = authorization.replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Empty token")
+
+    user_info = await user_resolver.validate_supabase_token(token)
+    if not user_info:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return user_info
+
+
 # ── Agent endpoints ──────────────────────────────────────────────────────────
 
 class AgentChatRequest(BaseModel):
     """Request model for the agentic chat endpoint."""
     message: str = Field(..., description="User message in natural language (Hebrew)")
-    client_id: str = Field(..., description="Airtable record ID of the client (recXXX)")
     session_id: str | None = Field(default=None, description="Session ID to continue an existing conversation")
+    # client_id is auto-resolved from auth token — no longer required in request
 
 
 class AgentChatResponse(BaseModel):
@@ -633,33 +659,68 @@ class AgentChatResponse(BaseModel):
 
 
 @app.post("/agent/chat", response_model=AgentChatResponse)
-async def agent_chat(request: AgentChatRequest):
+async def agent_chat(
+    request: AgentChatRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """Agentic chat — the LLM decides what tools to call.
 
-    Send a natural language message and the agent will:
-    1. Understand what you want
-    2. Pick the right tools (fetch data, generate content, etc.)
-    3. Execute them autonomously
-    4. Return a response with results
+    Requires Authorization: Bearer <supabase_token> header.
+    The agent will:
+    1. Resolve the user's client profile from their email
+    2. Understand the request
+    3. Pick the right tools (fetch data, generate content, etc.)
+    4. Execute them autonomously
+    5. Return a response with results
     """
     import agent_engine
 
+    user_id = current_user["user_id"]
+    user_email = current_user.get("email")
+
+    # Check quota before processing
+    quota_status = await quota_module.check_quota(user_id)
+    if not quota_status.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "חרגת ממכסת ההודעות היומית",
+                "plan": quota_status.plan,
+                "messages_used": quota_status.messages_used,
+                "messages_limit": quota_status.messages_limit,
+                "reset_time": quota_status.reset_time,
+            },
+        )
+
+    # Resolve client_id from user's email
+    client_id = await user_resolver.resolve_client_id(user_id, user_email)
+    if not client_id:
+        raise HTTPException(
+            status_code=404,
+            detail="לא נמצא פרופיל לקוחה מקושר לחשבון שלך. פני לתמיכה.",
+        )
+
     logger.info(
-        f"[Agent Chat] message={request.message[:100]}..., "
-        f"client={request.client_id}, session={request.session_id}"
+        f"[Agent Chat] user={user_id}, client={client_id}, "
+        f"message={request.message[:100]}..., session={request.session_id}"
     )
 
-    session = agent_engine.get_or_create_session(
-        client_id=request.client_id,
+    session = await agent_engine.get_or_create_session(
+        user_id=user_id,
+        client_id=client_id,
         session_id=request.session_id,
     )
 
     try:
         result = await agent_engine.run_agent(
             user_message=request.message,
-            client_id=request.client_id,
+            client_id=client_id,
             session=session,
         )
+
+        # Consume quota after successful response
+        await quota_module.consume_message(user_id)
+
         return AgentChatResponse(
             session_id=result.session_id,
             response=result.response,
@@ -668,24 +729,58 @@ async def agent_chat(request: AgentChatRequest):
             total_duration_ms=result.total_duration_ms,
             error=result.error,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"[Agent Chat] Failed: {e}")
         raise HTTPException(status_code=500, detail=f"Agent failed: {e}")
 
 
-@app.get("/agent/session/{session_id}")
-async def get_agent_session(session_id: str):
-    """Get the current state of an agent session."""
-    import agent_engine
+@app.get("/agent/sessions")
+async def list_agent_sessions(current_user: dict = Depends(get_current_user)):
+    """List the user's chat sessions for sidebar display."""
+    user_id = current_user["user_id"]
+    sessions = await session_store.list_sessions(user_id)
+    return {"sessions": sessions}
 
-    session = agent_engine.get_session(session_id)
+
+@app.get("/agent/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get full message history for a session."""
+    # Verify session belongs to user
+    session = await session_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("user_id") != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    messages = await session_store.get_messages(session_id)
+    return {"session_id": session_id, "messages": messages}
+
+
+@app.get("/agent/quota")
+async def get_agent_quota(current_user: dict = Depends(get_current_user)):
+    """Get current quota status for the authenticated user."""
+    user_id = current_user["user_id"]
+    return await quota_module.get_quota_status(user_id)
+
+
+@app.get("/agent/session/{session_id}")
+async def get_agent_session(session_id: str):
+    """Get the current state of an agent session (legacy endpoint)."""
+    session = await session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = await session_store.get_messages(session_id)
     return {
-        "session_id": session.session_id,
-        "client_id": session.client_id,
-        "message_count": len(session.messages),
-        "tool_calls": len(session.tool_history),
+        "session_id": session["id"],
+        "client_id": session.get("client_id", ""),
+        "message_count": len(messages),
+        "status": session.get("status", "active"),
     }
 
 
