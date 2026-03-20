@@ -123,10 +123,15 @@ async def run_agent(
     if session is None:
         session = get_or_create_session(client_id)
 
-    # Use the agent system prompt from prompts.py
+    # Use the agent system prompt from prompts.py, with client context injected
     if system_prompt is None:
         import prompts
-        system_prompt = prompts.AGENT_SYSTEM_PROMPT
+        system_prompt = (
+            prompts.AGENT_SYSTEM_PROMPT
+            + f"\n\n## הקשר נוכחי:\n"
+            f"client_id של הלקוחה הנוכחית: {client_id}\n"
+            f"השתמשי ב-client_id הזה בכל קריאה לכלים שדורשים אותו."
+        )
 
     session.add_user_message(user_message)
 
