@@ -49,10 +49,11 @@ async def resolve_client_id(user_id: str, user_email: str | None = None) -> str 
 
     Strategy:
     1. Check user_client_map cache table in Supabase.
-    2. If not found and email provided: search Airtable Clients by email.
-    3. If still not found: look up email from Supabase auth, then search Airtable.
-    4. If found: cache in user_client_map for future calls.
-    5. Returns client_id (recXXX) or None.
+    2. If not found and email provided: search Airtable Clients by Client Email field.
+    3. If not found: search Airtable by Client Name matching the email prefix (e.g. "gayahaelyon" → "גאיה").
+    4. If still not found: look up email from Supabase auth, then repeat search.
+    5. If found: cache in user_client_map for future calls.
+    6. Returns client_id (recXXX) or None.
     """
     # Step 1 — check cache
     cached = await _lookup_cached_mapping(user_id)
@@ -68,13 +69,18 @@ async def resolve_client_id(user_id: str, user_email: str | None = None) -> str 
         logger.warning(f"Cannot resolve client_id: no email for user {user_id}")
         return None
 
-    # Step 3 — search Airtable by email
+    # Step 3 — search Airtable by Client Email field
     client_id = await _search_airtable_client_by_email(email)
+
+    # Step 4 — fallback: search by display_name in Supabase user metadata
+    if not client_id:
+        client_id = await _search_airtable_client_by_user_metadata(user_id)
+
     if not client_id:
         logger.warning(f"No Airtable client found for email {email}")
         return None
 
-    # Step 4 — cache the mapping
+    # Step 5 — cache the mapping
     await _cache_mapping(user_id, client_id, email)
     logger.info(f"Resolved and cached: user {user_id} -> client {client_id}")
     return client_id
@@ -188,6 +194,61 @@ async def _cache_mapping(user_id: str, client_id: str, email: str) -> None:
     except Exception as e:
         # Non-fatal — next call will just search Airtable again
         logger.warning(f"Failed to cache mapping for user {user_id}: {e}")
+
+
+async def _search_airtable_client_by_user_metadata(user_id: str) -> str | None:
+    """Fallback: search Airtable by the user's display_name from Supabase metadata.
+
+    When Client Email is not set in Airtable, we try matching the user's
+    display_name (set during Lovable registration) against Client Name.
+    """
+    try:
+        client = _get_client()
+        response = client.auth.admin.get_user_by_id(user_id)
+        user = response.user
+        if not user:
+            return None
+
+        # Check user_metadata.display_name or user_metadata.full_name
+        meta = user.user_metadata or {}
+        display_name = meta.get("display_name") or meta.get("full_name") or ""
+        if not display_name:
+            return None
+
+        logger.info(f"Trying name-based match: '{display_name}'")
+        formula = f"{{Client Name}}='{_escape_airtable_string(display_name)}'"
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.get(
+                f"{_AIRTABLE_BASE_URL}/{config.TABLE_CLIENTS}",
+                headers=_AIRTABLE_HEADERS,
+                params={"filterByFormula": formula, "maxRecords": 1},
+            )
+            resp.raise_for_status()
+            records = resp.json().get("records", [])
+            if records:
+                record_id = records[0]["id"]
+                logger.info(f"Name-based match: '{display_name}' -> {record_id}")
+                return record_id
+
+        return None
+    except Exception as e:
+        logger.error(f"Name-based client search failed for user {user_id}: {e}")
+        return None
+
+
+async def invalidate_client_mapping(user_id: str) -> bool:
+    """Delete cached mapping so it gets re-resolved on next request.
+
+    Use this when a user reports being linked to the wrong client.
+    """
+    try:
+        client = _get_client()
+        client.table("user_client_map").delete().eq("user_id", user_id).execute()
+        logger.info(f"Invalidated client mapping for user {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to invalidate mapping for {user_id}: {e}")
+        return False
 
 
 def _escape_airtable_string(value: str) -> str:

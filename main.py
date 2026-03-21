@@ -784,6 +784,51 @@ async def get_agent_session(session_id: str):
     }
 
 
+# ── Admin endpoints ──────────────────────────────────────────────────────────
+
+
+@app.post("/admin/reset-mapping")
+async def reset_client_mapping(current_user: dict = Depends(get_current_user)):
+    """Reset the cached client mapping for the current user.
+
+    Forces re-resolution from Airtable on next request.
+    Useful when a user was mapped to the wrong client.
+    """
+    user_id = current_user["user_id"]
+    success = await user_resolver.invalidate_client_mapping(user_id)
+    if success:
+        return {"status": "ok", "message": "מיפוי אופס. בהודעה הבאה הלקוחה תזוהה מחדש."}
+    raise HTTPException(status_code=500, detail="Failed to reset mapping")
+
+
+@app.get("/admin/my-mapping")
+async def get_my_mapping(current_user: dict = Depends(get_current_user)):
+    """Show which Airtable client the current user is mapped to."""
+    user_id = current_user["user_id"]
+    client_id = await user_resolver.resolve_client_id(
+        user_id, current_user.get("email")
+    )
+    if client_id:
+        try:
+            client_record = await at.get_client(client_id)
+            client_name = client_record.get("fields", {}).get("Client Name", "unknown")
+        except Exception:
+            client_name = "unknown"
+        return {
+            "user_id": user_id,
+            "email": current_user.get("email"),
+            "client_id": client_id,
+            "client_name": client_name,
+        }
+    return {
+        "user_id": user_id,
+        "email": current_user.get("email"),
+        "client_id": None,
+        "client_name": None,
+        "message": "לא נמצא מיפוי ללקוחה",
+    }
+
+
 # ── Video endpoints ──────────────────────────────────────────────────────────
 
 class PickVideoRequest(BaseModel):
