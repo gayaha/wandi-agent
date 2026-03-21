@@ -105,16 +105,19 @@ def _ensure_today_row(client: Client, user_id: str) -> dict:
     today = _today_utc().isoformat()
 
     # Try fetching first (fast path -- avoids upsert overhead on every call)
-    resp = (
-        client.table(TABLE)
-        .select("*")
-        .eq("user_id", user_id)
-        .eq("period_start", today)
-        .maybe_single()
-        .execute()
-    )
-    if resp.data:
-        return resp.data
+    try:
+        resp = (
+            client.table(TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("period_start", today)
+            .maybe_single()
+            .execute()
+        )
+        if resp and resp.data:
+            return resp.data
+    except Exception as e:
+        logger.debug(f"Quota fetch failed (will upsert): {e}")
 
     # Row doesn't exist yet -- upsert with zeros
     row = {
@@ -124,12 +127,16 @@ def _ensure_today_row(client: Client, user_id: str) -> dict:
         "generations_used": 0,
         "plan": DEFAULT_PLAN,
     }
-    resp = (
-        client.table(TABLE)
-        .upsert(row, on_conflict="user_id,period_start")
-        .execute()
-    )
-    return resp.data[0] if resp.data else row
+    try:
+        resp = (
+            client.table(TABLE)
+            .upsert(row, on_conflict="user_id,period_start")
+            .execute()
+        )
+        return resp.data[0] if resp and resp.data else row
+    except Exception as e:
+        logger.warning(f"Quota upsert failed: {e}")
+        return row
 
 
 # ---------------------------------------------------------------------------
@@ -175,11 +182,15 @@ async def consume_message(user_id: str) -> None:
     try:
         client = _get_client()
         row = _ensure_today_row(client, user_id)
+        row_id = row.get("id")
+        if not row_id:
+            logger.warning(f"No quota row ID for {user_id}, skipping consume")
+            return
         new_count = row.get("messages_used", 0) + 1
         (
             client.table(TABLE)
             .update({"messages_used": new_count})
-            .eq("id", row["id"])
+            .eq("id", row_id)
             .execute()
         )
         logger.debug(f"User {user_id} messages_used -> {new_count}")
@@ -192,11 +203,15 @@ async def consume_generation(user_id: str, count: int = 1) -> None:
     try:
         client = _get_client()
         row = _ensure_today_row(client, user_id)
+        row_id = row.get("id")
+        if not row_id:
+            logger.warning(f"No quota row ID for {user_id}, skipping generation consume")
+            return
         new_count = row.get("generations_used", 0) + count
         (
             client.table(TABLE)
             .update({"generations_used": new_count})
-            .eq("id", row["id"])
+            .eq("id", row_id)
             .execute()
         )
         logger.debug(f"User {user_id} generations_used -> {new_count}")

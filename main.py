@@ -626,14 +626,18 @@ async def get_current_user(authorization: str = Header(default="")) -> dict:
     Raises 401 if token is invalid or missing.
     """
     if not authorization:
+        logger.warning("[Auth] Missing Authorization header")
         raise HTTPException(status_code=401, detail="Missing Authorization header")
 
     token = authorization.replace("Bearer ", "").strip()
     if not token:
+        logger.warning("[Auth] Empty token after stripping Bearer prefix")
         raise HTTPException(status_code=401, detail="Empty token")
 
+    logger.info(f"[Auth] Validating token: {token[:20]}...")
     user_info = await user_resolver.validate_supabase_token(token)
     if not user_info:
+        logger.warning(f"[Auth] Token validation failed for token: {token[:20]}...")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     return user_info
@@ -758,7 +762,12 @@ async def get_session_messages(
         raise HTTPException(status_code=403, detail="Access denied")
 
     messages = await session_store.get_messages(session_id)
-    return {"session_id": session_id, "messages": messages}
+    # Filter out internal tool messages — only show user + assistant to frontend
+    visible_messages = [
+        m for m in messages
+        if m.get("role") in ("user", "assistant")
+    ]
+    return {"session_id": session_id, "messages": visible_messages}
 
 
 @app.get("/agent/quota")

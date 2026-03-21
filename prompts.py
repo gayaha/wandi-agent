@@ -625,12 +625,13 @@ def build_single_reel_prompt(
         f"בחר הוק מרשימת ההוקים למטה והתאם לנישה. אל תעתיק — תתאים."
     )
 
-    # Compact client profile
+    # Compact client profile — keep short to reduce prompt size
     sections.append(
-        f"לקוח: {client_name} | נישה: {niche} | @{ig_username}"
+        f"לקוח: {client_name} | נישה: {niche} | @{ig_username}\n"
+        f"טון: {tone_of_voice[:200] if tone_of_voice else 'טבעי וישיר'}"
     )
 
-    # Client knowledge (trimmed)
+    # Client knowledge — only first 500 chars (trimmed)
     if client_knowledge and client_knowledge.strip():
         trimmed = re.sub(
             r'## SDMF Methodology.*?(?=##|\Z)',
@@ -638,6 +639,8 @@ def build_single_reel_prompt(
             client_knowledge.strip(),
             flags=re.DOTALL
         ).strip()
+        if len(trimmed) > 500:
+            trimmed = trimmed[:500] + "..."
         sections.append(f"ידע על הלקוח:\n{trimmed}")
 
     # Stage-specific instructions
