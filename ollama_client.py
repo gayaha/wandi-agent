@@ -30,7 +30,7 @@ async def generate(prompt: str, system: str | None = None) -> str:
         "options": {
             "temperature": 0.8,
             "top_p": 0.9,
-            "num_predict": 8192,
+            "num_predict": 1536,
         },
     }
     if system:
@@ -284,7 +284,7 @@ async def chat(
         "stream": False,
         "options": {
             "temperature": 0.3,  # Lower temp for tool-calling decisions
-            "num_predict": 4096,
+            "num_predict": 2048,
         },
     }
     if system:

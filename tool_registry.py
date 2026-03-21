@@ -11,6 +11,7 @@ via Ollama's native tool-calling API.  Tools have:
 import logging
 from typing import Any, Callable, Awaitable
 
+import analytics
 import airtable_client as at
 import ollama_client as ollama
 import prompts
@@ -186,6 +187,38 @@ async def _handle_get_insights(niche: str) -> dict[str, Any]:
     }
 
 
+async def _handle_analyze_performance(
+    client_id: str, days: int = 30,
+) -> dict[str, Any]:
+    """Analyze content performance — hooks, stages, engagement."""
+    return await analytics.get_content_performance(client_id, days=days)
+
+
+async def _handle_get_best_hooks(client_id: str) -> dict[str, Any]:
+    """Get best performing hooks for the client."""
+    return await analytics.get_hook_performance(client_id)
+
+
+async def _handle_get_rtm_events(niche: str = "") -> dict[str, Any]:
+    """Get active RTM (Real Time Marketing) events relevant to a niche."""
+    try:
+        events = await at.get_rtm_events(niche)
+        if not events:
+            return {"events": [], "message": "אין אירועי RTM פעילים כרגע בנישה הזו"}
+        formatted = []
+        for e in events:
+            f = e.get("fields", {})
+            formatted.append({
+                "name": f.get("Event Name", ""),
+                "description": f.get("Event Description", ""),
+                "expires": f.get("Expires At", ""),
+                "niches": f.get("Relevant Niches", []),
+            })
+        return {"events": formatted, "count": len(formatted)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Tool Registry ───────────────────────────────────────────────────────────
 
 TOOLS: list[Tool] = [
@@ -311,6 +344,45 @@ TOOLS: list[Tool] = [
             },
         },
         handler=_handle_get_insights,
+    ),
+    Tool(
+        name="analyze_performance",
+        description="מנתח ביצועי תוכן אחרונים — reach, saves, shares. מחזיר את ההוקים והשלבים הכי מוצלחים. השתמש כשהמשתמשת שואלת על ביצועים או רוצה לדעת מה עובד.",
+        parameters={
+            "client_id": {
+                "type": "string",
+                "description": "Airtable record ID of the client",
+                "required": True,
+            },
+            "days": {
+                "type": "integer",
+                "description": "Number of days to analyze (default 30)",
+            },
+        },
+        handler=_handle_analyze_performance,
+    ),
+    Tool(
+        name="get_best_hooks",
+        description="מחזיר את ההוקים הכי מוצלחים של הלקוחה לפי engagement, saves, shares. כולל פירוט לפי סוג הוק.",
+        parameters={
+            "client_id": {
+                "type": "string",
+                "description": "Airtable record ID of the client",
+                "required": True,
+            },
+        },
+        handler=_handle_get_best_hooks,
+    ),
+    Tool(
+        name="get_rtm_events",
+        description="שולף אירועי RTM (Real Time Marketing) פעילים — טרנדים, עדכונים, אירועים רלוונטיים לנישה. השתמש כשהמשתמשת רוצה תוכן על מה שקורה עכשיו.",
+        parameters={
+            "niche": {
+                "type": "string",
+                "description": "Niche name to find relevant events for",
+            },
+        },
+        handler=_handle_get_rtm_events,
     ),
 ]
 
