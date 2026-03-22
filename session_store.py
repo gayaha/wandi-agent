@@ -280,3 +280,106 @@ async def get_messages(session_id: str) -> list[dict]:
             f"Failed to get messages for session {session_id}: {e}"
         )
         return []
+
+
+# ── Drafts ────────────────────────────────────────────────────────────────
+
+
+async def save_drafts(session_id: str, drafts: list[dict]) -> list[dict]:
+    """Save generated draft reels for a session.
+
+    Each draft gets a sequential index (1-based) for user reference.
+    """
+    rows = []
+    now = datetime.now(timezone.utc).isoformat()
+    for i, draft in enumerate(drafts, 1):
+        rows.append({
+            "session_id": session_id,
+            "draft_index": i,
+            "content": draft,
+            "status": "pending",
+            "created_at": now,
+            "updated_at": now,
+        })
+
+    try:
+        client = _get_client()
+        # Delete any existing drafts for this session first
+        await _run_sync(
+            lambda: client.table("agent_drafts").delete().eq("session_id", session_id).execute()
+        )
+        result = await _run_sync(
+            lambda: client.table("agent_drafts").insert(rows).execute()
+        )
+        logger.info(f"Saved {len(rows)} drafts for session {session_id}")
+        return result.data
+    except Exception as e:
+        logger.error(f"Failed to save drafts: {e}")
+        raise
+
+
+async def get_drafts(session_id: str) -> list[dict]:
+    """Get all drafts for a session, ordered by index."""
+    try:
+        client = _get_client()
+        result = await _run_sync(
+            lambda: (
+                client.table("agent_drafts")
+                .select("*")
+                .eq("session_id", session_id)
+                .order("draft_index", desc=False)
+                .execute()
+            )
+        )
+        return result.data
+    except Exception as e:
+        logger.error(f"Failed to get drafts for session {session_id}: {e}")
+        return []
+
+
+async def update_draft(session_id: str, draft_index: int, content: dict) -> dict | None:
+    """Update a specific draft's content."""
+    try:
+        client = _get_client()
+        now = datetime.now(timezone.utc).isoformat()
+        result = await _run_sync(
+            lambda: (
+                client.table("agent_drafts")
+                .update({"content": content, "updated_at": now})
+                .eq("session_id", session_id)
+                .eq("draft_index", draft_index)
+                .execute()
+            )
+        )
+        if result.data:
+            logger.info(f"Updated draft {draft_index} in session {session_id}")
+            return result.data[0]
+        return None
+    except Exception as e:
+        logger.error(f"Failed to update draft {draft_index}: {e}")
+        return None
+
+
+async def mark_drafts_saved(session_id: str, indices: list[int] | None = None) -> int:
+    """Mark drafts as saved. If indices is None, mark all.
+
+    Returns number of drafts marked.
+    """
+    try:
+        client = _get_client()
+        now = datetime.now(timezone.utc).isoformat()
+        query = (
+            client.table("agent_drafts")
+            .update({"status": "saved", "updated_at": now})
+            .eq("session_id", session_id)
+            .eq("status", "pending")
+        )
+        if indices:
+            query = query.in_("draft_index", indices)
+        result = await _run_sync(lambda: query.execute())
+        count = len(result.data) if result.data else 0
+        logger.info(f"Marked {count} drafts as saved in session {session_id}")
+        return count
+    except Exception as e:
+        logger.error(f"Failed to mark drafts saved: {e}")
+        return 0

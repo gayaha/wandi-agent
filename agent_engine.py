@@ -102,7 +102,8 @@ async def run_agent(
             prompts.AGENT_SYSTEM_PROMPT
             + f"\n\n## הקשר נוכחי:\n"
             f"client_id של הלקוחה הנוכחית: {client_id}\n"
-            f"השתמשי ב-client_id הזה בכל קריאה לכלים שדורשים אותו."
+            f"session_id של השיחה הנוכחית: {session_id}\n"
+            f"השתמשי ב-client_id וב-session_id בכל קריאה לכלים שדורשים אותם."
         )
 
     # Load previous messages from Supabase for conversation continuity
