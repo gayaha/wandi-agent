@@ -619,3 +619,137 @@ async def generate_reels(
         "saved_count": len(saved),
         "errors": errors if errors else None,
     }
+
+
+async def generate_drafts(
+    client_id: str,
+    batch_type: str = "מעורב",
+    quantity: int = 3,
+    content_mix: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Generate reel drafts WITHOUT saving to Airtable.
+
+    Same pipeline as generate_reels() but stops after validation.
+    Returns draft reels for user review before saving.
+    """
+    if batch_type not in BATCH_TYPES:
+        raise ValueError(f"Invalid batch_type '{batch_type}'. Must be one of: {BATCH_TYPES}")
+    if quantity < 1 or quantity > 30:
+        raise ValueError("quantity must be between 1 and 30")
+
+    # Fetch client profile
+    client_record = await at.get_client(client_id)
+    client_fields = client_record["fields"]
+
+    client_name = (client_fields.get("Client Name") or "").strip()
+    business_info = client_fields.get("Business Info", "")
+    tone_of_voice = client_fields.get("Tone Of Voice", "")
+    ig_username = client_fields.get("ig_username", "")
+    client_knowledge = client_fields.get("Client Knowledge", "")
+
+    client_niche_ids: list[str] = client_fields.get("Niche") or []
+    niche_names_map = await at.get_niche_names(client_niche_ids)
+    niche_display = ", ".join(niche_names_map.values()) if niche_names_map else "כללי"
+
+    personal_brand_tags: list[str] = [
+        t.get("name", "") if isinstance(t, dict) else str(t)
+        for t in (client_fields.get("Personal Brand Tags") or [])
+    ]
+
+    # Fetch all data concurrently
+    data = await _fetch_all_data(
+        client_id, niche_display, client_name=client_name,
+        client_niche_ids=client_niche_ids,
+    )
+
+    # Decide distribution
+    distribution = _decide_distribution(batch_type, quantity, data["magnets"])
+    logger.info(f"[Drafts] Distribution: {distribution}")
+
+    # Generate via Ollama
+    mix = content_mix or {"niche": 1.0}
+    stage_sequence: list[tuple[str, str]] = []
+    for stage, count in distribution.items():
+        remaining = count
+        for category, ratio in mix.items():
+            cat_count = max(0, round(count * ratio))
+            cat_count = min(cat_count, remaining)
+            stage_sequence.extend([(stage, category)] * cat_count)
+            remaining -= cat_count
+        if remaining > 0:
+            first_cat = next(iter(mix))
+            stage_sequence.extend([(stage, first_cat)] * remaining)
+    stage_sequence = stage_sequence[:quantity]
+
+    all_recent = list(data["recent_hooks"])
+    generated_reels: list[dict] = []
+
+    for reel_idx, (stage, category) in enumerate(stage_sequence):
+        prompt = prompts.build_single_reel_prompt(
+            awareness_stage=stage,
+            client_name=client_name,
+            business_info=business_info,
+            tone_of_voice=tone_of_voice,
+            niche=niche_display,
+            ig_username=ig_username,
+            client_knowledge=client_knowledge,
+            magnets=data["magnets"],
+            style_examples=data["style_examples"],
+            hooks=data["hooks"],
+            rtm_events=data["rtm_events"],
+            insights=data["insights"],
+            recent_hooks=all_recent,
+            reel_index=reel_idx,
+            content_category=category,
+            personal_brand_tags=personal_brand_tags,
+        )
+
+        reel: dict | None = None
+        for attempt in range(2):
+            try:
+                result = await ollama.generate_json(prompt, system=prompts.FULL_SYSTEM_PROMPT)
+                if isinstance(result, dict):
+                    if "reels" in result and isinstance(result["reels"], list) and result["reels"]:
+                        reel = result["reels"][0]
+                    elif "hook" in result:
+                        reel = result
+                if reel:
+                    break
+            except ValueError as e:
+                logger.warning(f"[Drafts] Reel {reel_idx + 1} attempt {attempt + 1} failed: {e}")
+
+        if reel:
+            hook = reel.get("hook", "")
+            word_count = count_hebrew_words(hook)
+            logger.info(f"[Drafts] Reel {reel_idx + 1}/{quantity} ({stage}): {hook} [{word_count}w]")
+            all_recent.append(hook)
+            generated_reels.append(reel)
+
+    # Validate (but don't save)
+    valid_magnet_ids = {m["id"] for m in data["magnets"]}
+    for i, reel in enumerate(generated_reels):
+        generated_reels[i] = _validate_and_fix_reel(
+            reel, data["magnets"], valid_magnet_ids, None, i
+        )
+
+    # Return drafts without saving
+    drafts = []
+    magnet_names = {m["id"]: m.get("fields", {}).get("Magnet Name", "") for m in data["magnets"]}
+    for i, reel in enumerate(generated_reels):
+        drafts.append({
+            "draft_index": i + 1,
+            "hook": reel.get("hook", ""),
+            "hook_type": reel.get("hook_type", ""),
+            "text_on_video": reel.get("text_on_video"),
+            "caption": reel.get("caption", ""),
+            "content_type": reel.get("content_type", ""),
+            "awareness_stage": reel.get("awareness_stage", ""),
+            "magnet_name": magnet_names.get(reel.get("magnet_id", ""), ""),
+        })
+
+    return {
+        "success": True,
+        "client_name": client_name,
+        "drafts": drafts,
+        "count": len(drafts),
+    }
