@@ -369,7 +369,7 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="draft_content",
-        description="מייצר טיוטות של רילסים לבדיקת המשתמשת — בלי לשמור. המשתמשת תאשר או תבקש שינויים לפני שמירה.",
+        description="מייצר טיוטות של רילסים — כולל שליפת מגנטים, הוקים, וכל המידע הנדרש. זה הכלי העיקרי ליצירת תוכן! קרא לו ישירות אחרי get_client_profile.",
         parameters={
             "client_id": {
                 "type": "string",
