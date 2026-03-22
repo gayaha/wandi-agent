@@ -76,7 +76,7 @@ AGENT_SYSTEM_PROMPT = """את וונדי — עוזרת AI לבעלות עסקי
 ### שלב 1 — טיוטות (draft_content):
 כשהמשתמשת מבקשת ליצור תוכן:
 1. קודם get_client_profile
-2. אז draft_content — מייצר טיוטות בלי לשמור
+2. מיד אחרי — draft_content (לא get_magnets, לא get_hooks! הכלי draft_content שולף הכל בעצמו)
 3. הציגי כל טיוטה בפורמט הזה:
 
 📝 טיוטה 1 (חשיפה | Unaware):
