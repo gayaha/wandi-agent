@@ -149,7 +149,49 @@ async def run_agent(
         # If no tool calls — the agent is done thinking and wants to respond
         if not tool_calls:
             total_ms = int((time.time() - start_time) * 1000)
-            final_response = content or "סיימתי את המשימה."
+            final_response = content or ""
+
+            # If LLM gave empty/generic response but we have reel results,
+            # format them ourselves instead of showing "סיימתי את המשימה"
+            if (not final_response or "סיימתי" in final_response) and all_tool_calls:
+                # Collect all reels from write_reel calls
+                reels = []
+                for tc in all_tool_calls:
+                    if tc.tool_name == "write_reel" and isinstance(tc.result, dict):
+                        reel = tc.result.get("result", {}).get("reel")
+                        if reel:
+                            reels.append(reel)
+
+                # Also check for draft_content results (backward compat)
+                if not reels:
+                    draft_tc = next(
+                        (tc for tc in all_tool_calls if tc.tool_name == "draft_content"),
+                        None,
+                    )
+                    if draft_tc and isinstance(draft_tc.result, dict):
+                        for d in draft_tc.result.get("result", {}).get("drafts", []):
+                            reels.append(d)
+
+                if reels:
+                    lines = [f"הנה {len(reels)} טיוטות:\n"]
+                    for i, reel in enumerate(reels, 1):
+                        stage = reel.get("awareness_stage", "")
+                        ctype = reel.get("content_type", "")
+                        hook = reel.get("hook", "")
+                        tov = reel.get("text_on_video")
+                        caption = reel.get("caption", "")
+                        lines.append(f"📝 טיוטה {i} ({ctype} | {stage}):")
+                        lines.append(f"הוק: \"{hook}\"")
+                        if tov:
+                            lines.append(f"טקסט על הסרטון: \"{tov}\"")
+                        if caption:
+                            lines.append(f"קפשן: \"{caption[:100]}...\"")
+                        lines.append("")
+                    lines.append("מה דעתך? אפשר לאשר, לבקש שינויים בטיוטה ספציפית, או להתחיל מחדש")
+                    final_response = "\n".join(lines)
+
+            if not final_response:
+                final_response = "סיימתי את המשימה."
 
             # Persist assistant response to Supabase
             await session_store.save_message(
