@@ -207,6 +207,65 @@ async def _handle_edit_draft(
     }
 
 
+async def _handle_write_reel(
+    client_name: str,
+    niche: str,
+    ig_username: str = "",
+    tone: str = "ישירה, בטוחה, חדה",
+    awareness_stage: str = "Unaware",
+    stage_instruction: str = "",
+    selected_hook: str = "",
+    hook_type: str = "פרובוקציה",
+    creative_direction: str = "",
+    magnet_name: str = "",
+    magnet_trigger_word: str = "",
+    magnet_id: str = "",
+) -> dict[str, Any]:
+    """Generate a single reel from a focused creative brief.
+
+    The agent brain has already selected the hook and written
+    the creative direction. This tool sends a compact prompt
+    to the content writer (Dicta).
+    """
+    # Default stage instruction if not provided
+    if not stage_instruction:
+        stage_instructions = {
+            "Unaware": "חשיפה בלבד. עצור סקרול. אסור מגנט.",
+            "Problem-Aware": "תוכן ערכי. תן שם לכאב. מגנט אופציונלי.",
+            "Solution-Aware": "מכירה עם מגנט. CTA עם טריגר.",
+        }
+        stage_instruction = stage_instructions.get(awareness_stage, "")
+
+    prompt = prompts.build_focused_reel_prompt(
+        client_name=client_name,
+        niche=niche,
+        ig_username=ig_username,
+        tone=tone,
+        awareness_stage=awareness_stage,
+        stage_instruction=stage_instruction,
+        selected_hook=selected_hook,
+        hook_type=hook_type,
+        creative_direction=creative_direction,
+        magnet_name=magnet_name or None,
+        magnet_trigger_word=magnet_trigger_word or None,
+        magnet_id=magnet_id or None,
+    )
+
+    try:
+        result = await ollama.generate_json(prompt, system=prompts.FOCUSED_SYSTEM_PROMPT)
+        if isinstance(result, dict):
+            if "reels" in result and isinstance(result["reels"], list) and result["reels"]:
+                reel = result["reels"][0]
+            elif "hook" in result:
+                reel = result
+            else:
+                return {"error": "המודל לא החזיר תוצאה תקינה"}
+            return {"success": True, "reel": reel}
+        return {"error": "תשובה לא תקינה מהמודל"}
+    except ValueError as e:
+        return {"error": f"שגיאה בייצור תוכן: {str(e)}"}
+
+
 async def _handle_approve_and_save(
     session_id: str,
     client_id: str,
@@ -368,57 +427,61 @@ TOOLS: list[Tool] = [
         handler=_handle_get_recent_hooks,
     ),
     Tool(
-        name="draft_content",
-        description="מייצר טיוטות של רילסים — כולל שליפת מגנטים, הוקים, וכל המידע הנדרש. זה הכלי העיקרי ליצירת תוכן! קרא לו ישירות אחרי get_client_profile.",
+        name="write_reel",
+        description="מייצר רילס אחד מ-brief יצירתי ממוקד. השתמש אחרי שבחרת הוק מ-get_hooks וכתבת הנחיה יצירתית. הכלי שולח brief קצר וממוקד למודל תוכן.",
         parameters={
-            "client_id": {
+            "client_name": {
                 "type": "string",
-                "description": "Airtable record ID of the client",
+                "description": "Client name",
                 "required": True,
             },
-            "batch_type": {
+            "niche": {
                 "type": "string",
-                "description": "חשיפה / מכירה / מעורב",
+                "description": "Client primary niche",
                 "required": True,
             },
-            "quantity": {
-                "type": "integer",
-                "description": "Number of draft reels to generate (1-10)",
+            "ig_username": {
+                "type": "string",
+                "description": "Instagram username",
+            },
+            "tone": {
+                "type": "string",
+                "description": "Tone description in Hebrew (2-5 words)",
+            },
+            "awareness_stage": {
+                "type": "string",
+                "description": "Unaware / Problem-Aware / Solution-Aware",
                 "required": True,
             },
-            "session_id": {
+            "selected_hook": {
                 "type": "string",
-                "description": "Session ID for storing drafts",
+                "description": "The specific hook to use as inspiration",
+                "required": True,
+            },
+            "hook_type": {
+                "type": "string",
+                "description": "Hook type: פרובוקציה / שאלה מאתגרת / מספר + הבטחה / etc",
+                "required": True,
+            },
+            "creative_direction": {
+                "type": "string",
+                "description": "2-3 sentences explaining the angle, what to adapt, and the target emotion",
+                "required": True,
+            },
+            "magnet_name": {
+                "type": "string",
+                "description": "Magnet name (for Solution-Aware only)",
+            },
+            "magnet_trigger_word": {
+                "type": "string",
+                "description": "Exact trigger word for CTA (for Solution-Aware only)",
+            },
+            "magnet_id": {
+                "type": "string",
+                "description": "Airtable magnet record ID (for Solution-Aware only)",
             },
         },
-        handler=_handle_draft_content,
-    ),
-    Tool(
-        name="edit_draft",
-        description="משנה טיוטה ספציפית לפי בקשת המשתמשת. השתמש כשהמשתמשת רוצה לשנות טיוטה מסוימת.",
-        parameters={
-            "session_id": {
-                "type": "string",
-                "description": "Session ID where drafts are stored",
-                "required": True,
-            },
-            "draft_index": {
-                "type": "integer",
-                "description": "Draft number to edit (1-based)",
-                "required": True,
-            },
-            "instruction": {
-                "type": "string",
-                "description": "What to change (user's feedback)",
-                "required": True,
-            },
-            "client_id": {
-                "type": "string",
-                "description": "Airtable record ID of the client",
-                "required": True,
-            },
-        },
-        handler=_handle_edit_draft,
+        handler=_handle_write_reel,
     ),
     Tool(
         name="approve_and_save",
