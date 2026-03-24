@@ -193,15 +193,24 @@ async def run_agent(
                 # Save drafts to Supabase agent_drafts (not Airtable).
                 # Airtable save happens later via render_and_publish tool
                 # when the user approves the drafts.
+                # Skip if drafts already exist (write_reel with draft_index
+                # handles updates; we only create on the first pass).
                 draft_count = 0
                 try:
-                    draft_list = [{"content": reel} for reel in reels]
-                    await session_store.save_drafts(session_id, [r for r in reels])
-                    draft_count = len(reels)
-                    logger.info(
-                        f"[Agent] Saved {draft_count} drafts to agent_drafts "
-                        f"for session {session_id}"
-                    )
+                    existing_drafts = await session_store.get_drafts(session_id)
+                    if existing_drafts:
+                        logger.info(
+                            f"[Agent] {len(existing_drafts)} drafts already exist "
+                            f"for session {session_id}, skipping auto-save"
+                        )
+                        draft_count = len(existing_drafts)
+                    else:
+                        await session_store.save_drafts(session_id, [r for r in reels])
+                        draft_count = len(reels)
+                        logger.info(
+                            f"[Agent] Saved {draft_count} drafts to agent_drafts "
+                            f"for session {session_id}"
+                        )
                 except Exception as e:
                     logger.error(f"[Agent] Failed to save drafts: {e}")
 
