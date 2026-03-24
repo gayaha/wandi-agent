@@ -77,7 +77,7 @@ class Tool:
 # Each handler wraps an existing function and returns a serializable result.
 
 
-async def _handle_get_client_profile(client_id: str) -> dict[str, Any]:
+async def _handle_get_client_profile(client_id: str, **kwargs) -> dict[str, Any]:
     """Fetch client profile from Airtable."""
     record = await at.get_client(client_id)
     fields = record.get("fields", {})
@@ -110,7 +110,7 @@ async def _handle_get_client_profile(client_id: str) -> dict[str, Any]:
     }
 
 
-async def _handle_get_magnets(client_id: str, client_name: str = "") -> list[dict]:
+async def _handle_get_magnets(client_id: str, client_name: str = "", **kwargs) -> list[dict]:
     """Fetch magnets for a client."""
     magnets = await at.get_magnets_for_client(client_id, client_name=client_name)
     return [
@@ -128,6 +128,7 @@ async def _handle_get_magnets(client_id: str, client_name: str = "") -> list[dic
 async def _handle_get_hooks(
     niche_ids: list[str] | None = None,
     limit: int = 20,
+    **kwargs,
 ) -> list[dict]:
     """Fetch viral hooks filtered by niche."""
     hooks = await at.get_viral_hooks(niche_ids or [], limit=min(limit, 20))
@@ -144,7 +145,7 @@ async def _handle_get_hooks(
 
 
 async def _handle_get_recent_hooks(
-    client_id: str, client_name: str = "",
+    client_id: str, client_name: str = "", **kwargs,
 ) -> list[str]:
     """Fetch recent hooks for deduplication."""
     return await at.get_recent_hooks_for_client(
@@ -157,6 +158,7 @@ async def _handle_draft_content(
     batch_type: str = "מעורב",
     quantity: int = 3,
     session_id: str = "",
+    **kwargs,
 ) -> dict[str, Any]:
     """Generate draft reels for user review — does NOT save to Airtable.
 
@@ -196,6 +198,7 @@ async def _handle_edit_draft(
     draft_index: int,
     instruction: str,
     client_id: str = "",
+    **kwargs,
 ) -> dict[str, Any]:
     """Re-generate a specific draft based on user feedback."""
     import agent as agent_module
@@ -248,6 +251,7 @@ async def _handle_write_reel(
     magnet_name: str = "",
     magnet_trigger_word: str = "",
     magnet_id: str = "",
+    **kwargs,
 ) -> dict[str, Any]:
     """Generate a single reel from a focused creative brief.
 
@@ -385,6 +389,7 @@ async def _handle_approve_and_save(
     session_id: str,
     client_id: str,
     draft_indices: list[int] | None = None,
+    **kwargs,
 ) -> dict[str, Any]:
     """Save approved drafts to Airtable Content Queue."""
     import session_store
@@ -431,7 +436,7 @@ async def _handle_approve_and_save(
     }
 
 
-async def _handle_get_insights(niche: str) -> dict[str, Any]:
+async def _handle_get_insights(niche: str, **kwargs) -> dict[str, Any]:
     """Fetch global insights for a niche."""
     insights = await at.get_global_insights(niche)
     if not insights:
@@ -447,18 +452,18 @@ async def _handle_get_insights(niche: str) -> dict[str, Any]:
 
 
 async def _handle_analyze_performance(
-    client_id: str, days: int = 30,
+    client_id: str, days: int = 30, **kwargs,
 ) -> dict[str, Any]:
     """Analyze content performance — hooks, stages, engagement."""
     return await analytics.get_content_performance(client_id, days=days)
 
 
-async def _handle_get_best_hooks(client_id: str) -> dict[str, Any]:
+async def _handle_get_best_hooks(client_id: str, **kwargs) -> dict[str, Any]:
     """Get best performing hooks for the client."""
     return await analytics.get_hook_performance(client_id)
 
 
-async def _handle_get_rtm_events(niche: str = "") -> dict[str, Any]:
+async def _handle_get_rtm_events(niche: str = "", **kwargs) -> dict[str, Any]:
     """Get active RTM (Real Time Marketing) events relevant to a niche."""
     try:
         events = await at.get_rtm_events(niche)
@@ -693,6 +698,7 @@ async def execute_tool(
     name: str,
     arguments: dict[str, Any],
     authorized_client_id: str = "",
+    user_id: str = "",
 ) -> dict[str, Any]:
     """Execute a tool by name with given arguments.
 
@@ -701,6 +707,8 @@ async def execute_tool(
             When provided, any client_id in the arguments is overridden
             with this value to prevent GLM from accessing other clients'
             data (prompt injection or hallucination).
+        user_id: Supabase user UUID (needed by video_picker for
+            raw-media/{user_id}/ paths).
 
     Returns a dict with either the result or an error message.
     """
@@ -728,9 +736,18 @@ async def execute_tool(
         if v is not None and k in tool.parameters
     }
 
+    # Inject execution context so tool handlers can access verified
+    # identity without relying on GLM-provided values.
+    # Handlers that need these accept **kwargs.
+    exec_context = {}
+    if authorized_client_id:
+        exec_context["authorized_client_id"] = authorized_client_id
+    if user_id:
+        exec_context["user_id"] = user_id
+
     try:
         logger.info(f"Executing tool: {name}({clean_args})")
-        result = await tool.handler(**clean_args)
+        result = await tool.handler(**clean_args, **exec_context)
         return {"result": result}
     except Exception as e:
         logger.error(f"Tool {name} failed: {e}")

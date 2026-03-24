@@ -722,6 +722,7 @@ async def _run_agent_background(
             user_message=message,
             client_id=client_id,
             session=session,
+            user_id=user_id,
         )
         await session_store.update_session_status(session_id, "complete")
         logger.info(f"[Agent Background] Completed session {session_id}")
@@ -829,6 +830,7 @@ async def agent_chat(
                 user_message=request.message,
                 client_id=client_id,
                 session=session,
+                user_id=user_id,
             )
 
             # Consume quota after successful response

@@ -92,6 +92,7 @@ async def run_agent(
     client_id: str,
     session: dict,
     system_prompt: str | None = None,
+    user_id: str = "",
 ) -> AgentResult:
     """Run the agent loop — LLM decides what tools to call.
 
@@ -276,6 +277,7 @@ async def run_agent(
             result = await tool_registry.execute_tool(
                 tool_name, tool_args,
                 authorized_client_id=client_id,
+                user_id=user_id,
             )
 
             tool_duration = int((time.time() - tool_start) * 1000)
