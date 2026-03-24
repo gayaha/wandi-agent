@@ -493,6 +493,180 @@ async def _handle_get_rtm_events(niche: str = "", **kwargs) -> dict[str, Any]:
 
 # ── Tool Registry ───────────────────────────────────────────────────────────
 
+async def _handle_render_and_publish(
+    session_id: str, **kwargs,
+) -> dict[str, Any]:
+    """Render video reels from approved drafts.
+
+    Flow:
+    1. Fetch drafts from agent_drafts (Supabase)
+    2. Pre-check: verify raw videos exist for user
+    3. Save reels to Airtable Content Queue → get record_ids
+    4. Pick source videos from Supabase Storage
+    5. Submit renders to remotion-service + poll until done
+    6. Upload rendered mp4 to Supabase Storage
+    7. Update Airtable records with video attachment
+    8. Mark drafts as saved
+    """
+    import asyncio
+    import os
+    import agent as agent_module
+    import session_store
+    import supabase_client
+    import video_picker
+    from renderer import get_renderer, RenderRequest
+    from renderer.brand import resolve_brand_for_render
+
+    _STAGE_MAP = {"Unaware": 1, "Problem-Aware": 3, "Solution-Aware": 5}
+
+    client_id = kwargs.get("authorized_client_id", "")
+    user_id = kwargs.get("user_id", "")
+
+    if not client_id or not user_id:
+        return {"success": False, "error": "Missing client_id or user_id"}
+
+    # 1. Fetch drafts
+    drafts = await session_store.get_drafts(session_id)
+    if not drafts:
+        return {"success": False, "error": "אין טיוטות לרנדר בסשן הזה"}
+
+    reels = [d.get("content", {}) for d in drafts if d.get("status") == "pending"]
+    if not reels:
+        return {"success": False, "error": "כל הטיוטות כבר נשמרו"}
+
+    # 2. Pre-check: verify raw videos exist
+    raw_videos = supabase_client.list_raw_videos(user_id)
+    if not raw_videos:
+        return {
+            "success": False,
+            "error": "אין סרטוני גלם. צריך להעלות סרטונים לפני רינדור.",
+        }
+
+    # 3. Save to Airtable Content Queue → get record_ids
+    queue_records = [agent_module._build_queue_record(r, client_id) for r in reels]
+    saved_records = []
+    for i, rec in enumerate(queue_records):
+        try:
+            result = await at.save_reels_to_queue([rec])
+            saved_records.extend(result)
+        except Exception as e:
+            logger.error(f"[render_and_publish] Failed to save reel {i + 1}: {e}")
+    if not saved_records:
+        return {"success": False, "error": "שמירה ב-Airtable נכשלה"}
+
+    logger.info(
+        f"[render_and_publish] Saved {len(saved_records)}/{len(reels)} to Airtable"
+    )
+
+    # 4. Pick source videos (simple random selection per reel)
+    video_urls = []
+    for _ in saved_records:
+        url = supabase_client.pick_random_source_video(user_id)
+        video_urls.append(url)
+
+    # 5. Fetch client record for brand config
+    client_record = await at.get_client(client_id)
+    brand_config = at.extract_brand_config(client_record)
+
+    # 6. Render each reel
+    rendered_count = 0
+    max_poll_attempts = 120 + (max(1, (len(saved_records) + 1) // 2) * 36)
+
+    async def _render_one(idx: int) -> bool:
+        """Render a single reel. Returns True on success."""
+        record = saved_records[idx]
+        reel = reels[idx] if idx < len(reels) else {}
+        video_url = video_urls[idx] if idx < len(video_urls) else None
+        record_id = record.get("id", "")
+
+        if not video_url or not record_id:
+            logger.warning(f"[render_and_publish] Reel {idx + 1}: no video or record_id, skipping")
+            return False
+
+        try:
+            # Build RenderRequest — same pattern as Path B (main.py:281-290)
+            from renderer.models import RenderRequest as RR
+            render_req = RR(
+                source_video_url=video_url,
+                hook_text=reel.get("hook") or "",
+                body_text=reel.get("text_on_video") or "",
+                record_id=record_id,
+                client_id=client_id,
+                awareness_stage=_STAGE_MAP.get(
+                    reel.get("awareness_stage", ""), None
+                ),
+            )
+
+            renderer = get_renderer()
+            resolved_brand = resolve_brand_for_render(
+                brand_config, render_req.awareness_stage
+            )
+
+            # Import _build_segments from main.py (it's a module-level function)
+            from main import _build_segments
+            segments = _build_segments(render_req)
+
+            remotion_job_id = await renderer.render(
+                render_req, resolved_brand=resolved_brand, segments=segments
+            )
+
+            # Poll until done
+            for attempt in range(max_poll_attempts):
+                status = await renderer.get_status(remotion_job_id)
+                if status.state == "completed":
+                    break
+                elif status.state == "failed":
+                    raise RuntimeError(f"Render failed: {status.error}")
+                wait = min(2 + attempt, 5)
+                await asyncio.sleep(wait)
+            else:
+                raise RuntimeError("Render timed out after max poll attempts")
+
+            # Download + upload
+            tmp_path = f"/tmp/{record_id}-{remotion_job_id}.mp4"
+            await renderer.download_file(remotion_job_id, tmp_path)
+
+            destination = f"{record_id}/{remotion_job_id}.mp4"
+            final_url = await supabase_client.upload_video(tmp_path, destination)
+
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+            logger.info(f"[render_and_publish] Rendered reel {idx + 1}: {final_url}")
+
+            # Update Airtable with video attachment
+            try:
+                await at.update_content_queue_video_attachment(record_id, final_url)
+            except Exception as e:
+                logger.error(f"[render_and_publish] Airtable attachment failed: {e}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"[render_and_publish] Render failed for reel {idx + 1}: {e}")
+            return False
+
+    # Run renders with concurrency (2 at a time, like Path B)
+    results = await asyncio.gather(
+        *[_render_one(i) for i in range(len(saved_records))]
+    )
+    rendered_count = sum(1 for r in results if r)
+
+    # 7. Mark drafts as saved
+    draft_indices = [d.get("draft_index") for d in drafts if d.get("status") == "pending"]
+    await session_store.mark_drafts_saved(session_id, draft_indices)
+
+    return {
+        "success": True,
+        "total_drafts": len(reels),
+        "saved_to_airtable": len(saved_records),
+        "rendered": rendered_count,
+        "message": f"{rendered_count} רילסים רונדרו בהצלחה ומוכנים בדף התוכן",
+    }
+
+
 TOOLS: list[Tool] = [
     Tool(
         name="get_client_profile",
