@@ -443,7 +443,7 @@ async def update_content_queue_video_attachment(record_id: str, video_url: str) 
         resp = await client.patch(
             f"{BASE_URL}/{config.TABLE_CONTENT_QUEUE}/{record_id}",
             headers=HEADERS,
-            json={"fields": {"Final Video": [{"url": video_url}], "Status": "Ready"}},
+            json={"fields": {"Final Video": [{"url": video_url}], "Status": "Done"}},
         )
         resp.raise_for_status()
         logger.info(f"Updated Content Queue {record_id} with video attachment")
