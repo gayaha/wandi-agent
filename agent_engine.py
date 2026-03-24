@@ -190,33 +190,20 @@ async def run_agent(
                         reels.append(d)
 
             if reels:
-                # Auto-save reels to Airtable Content Queue
-                # Uses batch first, falls back to individual saves on error
-                # (e.g. one bad magnet_id can cause a 422 that kills the whole batch)
-                saved_count = 0
+                # Save drafts to Supabase agent_drafts (not Airtable).
+                # Airtable save happens later via render_and_publish tool
+                # when the user approves the drafts.
+                draft_count = 0
                 try:
-                    import agent as agent_module
-                    import airtable_client as at
-                    queue_records = [agent_module._build_queue_record(r, client_id) for r in reels]
-                    try:
-                        saved = await at.save_reels_to_queue(queue_records)
-                        saved_count = len(saved)
-                    except Exception as batch_err:
-                        logger.warning(
-                            f"[Agent] Batch save failed ({batch_err}), "
-                            f"falling back to individual saves"
-                        )
-                        for i, rec in enumerate(queue_records):
-                            try:
-                                result_records = await at.save_reels_to_queue([rec])
-                                saved_count += len(result_records)
-                            except Exception as single_err:
-                                logger.error(
-                                    f"[Agent] Failed to save reel {i + 1}: {single_err}"
-                                )
-                    logger.info(f"[Agent] Auto-saved {saved_count}/{len(reels)} reels to Airtable")
+                    draft_list = [{"content": reel} for reel in reels]
+                    await session_store.save_drafts(session_id, [r for r in reels])
+                    draft_count = len(reels)
+                    logger.info(
+                        f"[Agent] Saved {draft_count} drafts to agent_drafts "
+                        f"for session {session_id}"
+                    )
                 except Exception as e:
-                    logger.error(f"[Agent] Failed to auto-save reels to Airtable: {e}")
+                    logger.error(f"[Agent] Failed to save drafts: {e}")
 
                 # Always format reels ourselves for consistent display
                 lines = [f"הנה {len(reels)} טיוטות:\n"]
@@ -233,8 +220,9 @@ async def run_agent(
                     if caption:
                         lines.append(f"קפשן: \"{caption[:100]}...\"")
                     lines.append("")
-                if saved_count > 0:
-                    lines.append(f"✅ {saved_count} טיוטות נשמרו ב-Content Queue")
+                if draft_count > 0:
+                    lines.append(f"✅ {draft_count} טיוטות נשמרו")
+                    lines.append("כשהטיוטות מוכנות, אגיד \"רנדרי\" כדי ליצור סרטונים ולפרסם בדף התוכן")
                 lines.append("מה דעתך? אפשר לבקש שינויים בטיוטה ספציפית, או להתחיל מחדש")
                 final_response = "\n".join(lines)
 
