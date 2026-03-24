@@ -18,13 +18,24 @@ async def list_models() -> list[dict[str, Any]]:
         return resp.json().get("models", [])
 
 
-async def generate(prompt: str, system: str | None = None) -> str:
+async def generate(
+    prompt: str,
+    system: str | None = None,
+    *,
+    model: str | None = None,
+    format: str | None = None,
+) -> str:
     """Generate text using the configured Ollama model.
 
     Uses the /api/generate endpoint with stream=false for simplicity.
+
+    Args:
+        format: If "json", Ollama constrains output to valid JSON.
+                Only use for models that handle it well (e.g. mistral-small).
     """
+    resolved_model = model or config.OLLAMA_MODEL
     payload: dict[str, Any] = {
-        "model": config.OLLAMA_MODEL,
+        "model": resolved_model,
         "prompt": prompt,
         "stream": False,
         "options": {
@@ -35,8 +46,10 @@ async def generate(prompt: str, system: str | None = None) -> str:
     }
     if system:
         payload["system"] = system
+    if format:
+        payload["format"] = format
 
-    logger.info(f"Calling Ollama ({config.OLLAMA_MODEL}) — prompt length: {len(prompt)}")
+    logger.info(f"Calling Ollama ({resolved_model}) — prompt length: {len(prompt)}")
 
     async with httpx.AsyncClient(timeout=600) as client:
         resp = await client.post(
@@ -225,14 +238,23 @@ def _parse_json_robust(cleaned: str) -> Any:
     return None
 
 
-async def generate_json(prompt: str, system: str | None = None) -> Any:
+async def generate_json(
+    prompt: str,
+    system: str | None = None,
+    *,
+    model: str | None = None,
+    format: str | None = None,
+) -> Any:
     """Generate and parse JSON from Ollama.
 
     Attempts to extract a JSON object or array from the model response,
     even if the model wraps it in markdown code fences. Handles Hebrew
     gershayim characters that look like double quotes inside string values.
+
+    Args:
+        format: If "json", Ollama constrains output to valid JSON.
     """
-    raw = await generate(prompt, system)
+    raw = await generate(prompt, system, model=model, format=format)
 
     # Strip markdown code fences if present
     cleaned = raw.strip()
@@ -284,7 +306,7 @@ async def chat(
         "stream": False,
         "options": {
             "temperature": 0.3,  # Lower temp for tool-calling decisions
-            "num_predict": 2048,
+            "num_predict": 8192,  # qwen3 needs room for <think> block before tool calls
         },
     }
     if system:

@@ -69,19 +69,35 @@ FULL_SYSTEM_PROMPT = SYSTEM_PROMPT
 
 # ── Focused System Prompt (for write_reel tool — compact, cached) ─────────
 
-FOCUSED_SYSTEM_PROMPT = """אתה קופירייטר ישראלי מומחה לתוכן אינסטגרם רילס.
+FOCUSED_SYSTEM_PROMPT = """You are an expert Instagram Reels copywriter.
 
-כללי כתיבה:
-- עברית יומיומית ישירה, לא מתורגמת, ביטויים שישראלים באמת משתמשים בהם
-- הוק עוצר סקרול תוך שנייה, עד 10 מילים
-- קח את ההוק שקיבלת כהשראה למבנה — שנה את הנושא לנישה של הלקוח
-- אל תעתיק את ההוק המקורי — צור גרסה חדשה ויצירתית
+Rules:
+- Write ALL content in English (it will be translated to Hebrew later)
+- Hook: max 10 words, must stop the scroll in 1 second
+- Take the hook inspiration and adapt it to the client's niche — don't copy it
+- Be provocative, emotional, authentic — write like a real person, not a marketer
+- text_on_video: short punchy lines (3-5 lines) or null depending on stage
 
-ערכים מותרים:
-- hook_type: שאלה מאתגרת / מספר + הבטחה / טעות נפוצה / סוד חשיפה / זיהוי קהל / תוצאה מפתיעה / פרובוקציה
-- content_type: חשיפה / מכירה
+Return JSON only."""
 
-החזר JSON בלבד."""
+
+DICTA_TRANSLATE_SYSTEM_PROMPT = """את מתרגמת תוכן אינסטגרם מאנגלית לעברית ישראלית יומיומית.
+
+כללים:
+- תרגום חופשי, לא מילולי — תעבירי את אותו רגש, עוקץ וטון
+- עברית שיחתית כמו שישראלית מדברת לחברה שלה
+- שמרי על אורך דומה (הוק עד 10 מילים)
+- ערכי hook_type לעברית: שאלה מאתגרת / מספר + הבטחה / טעות נפוצה / סוד חשיפה / זיהוי קהל / תוצאה מפתיעה / פרובוקציה
+- ערכי content_type לעברית: חשיפה / מכירה
+- ערכי awareness_stage: Unaware / Problem-Aware / Solution-Aware (השאירי באנגלית)
+
+כתבי כל שדה בשורה נפרדת עם תווית באנגלית גדולה ואחריה נקודתיים:
+HOOK: [התרגום]
+CAPTION: [התרגום]
+TEXT_ON_VIDEO: [התרגום או null]
+HOOK_TYPE: [בעברית]
+CONTENT_TYPE: [בעברית]
+AWARENESS_STAGE: [באנגלית כמו שזה]"""
 
 
 def build_focused_reel_prompt(
@@ -108,41 +124,41 @@ def build_focused_reel_prompt(
     Target: 400-800 chars (~400-600 tokens).
     """
     lines = [
-        f"לקוח: {client_name} | נישה: {niche} | @{ig_username}",
-        f"טון: {tone}",
-        f"שלב: {awareness_stage} — {stage_instruction}",
+        f"Client: {client_name} | Niche: {niche} | @{ig_username}",
+        f"Tone: {tone}",
+        f"Stage: {awareness_stage} — {stage_instruction}",
         "",
-        f"הוק להשראה ({hook_type}): \"{selected_hook}\"",
-        f"הנחיה יצירתית: {creative_direction}",
+        f"Hook inspiration ({hook_type}): \"{selected_hook}\"",
+        f"Creative direction: {creative_direction}",
     ]
 
     if magnet_name and awareness_stage == "Solution-Aware":
-        lines.append(f"מגנט: {magnet_name} | טריגר: \"{magnet_trigger_word}\"")
-        lines.append("חובה: CTA בקפשן עם מילת הטריגר המדויקת")
+        lines.append(f"Magnet: {magnet_name} | Trigger word: \"{magnet_trigger_word}\"")
+        lines.append("Required: CTA in caption must include the exact trigger word")
 
     # Unaware = hook only, no text_on_video
     if awareness_stage == "Unaware":
-        text_on_video_rule = "text_on_video: null (רק הוק על הסרטון)"
-        cta = "CTA: עקבו / שמרו / שתפו"
+        text_on_video_rule = "text_on_video: null (hook only on video)"
+        cta = "CTA: follow / save / share"
     elif awareness_stage == "Problem-Aware":
-        text_on_video_rule = "text_on_video: 3-5 שורות ערכיות קצרות"
-        cta = "CTA: שמרו / תייגו / כתבו בתגובות"
+        text_on_video_rule = "text_on_video: 3-5 short punchy value lines"
+        cta = "CTA: save / tag / comment"
     else:
-        text_on_video_rule = "text_on_video: 3-5 שורות שמסבירות את הפתרון"
-        cta = f"CTA: תגיבו '{magnet_trigger_word or ''}' ותקבלו..."
+        text_on_video_rule = "text_on_video: 3-5 lines explaining the solution"
+        cta = f"CTA: comment '{magnet_trigger_word or ''}' to get..."
 
     lines.extend([
         "",
         text_on_video_rule,
         cta,
         "",
-        "החזר JSON בלבד:",
+        "Return JSON only:",
         "{",
-        '  "hook": "הוק חדש מותאם, עד 10 מילים",',
+        '  "hook": "new adapted hook, max 10 words",',
         f'  "hook_type": "{hook_type}",',
-        '  "text_on_video": "..." או null,',
+        '  "text_on_video": "..." or null,',
         '  "caption": "...",',
-        f'  "content_type": "{"מכירה" if awareness_stage == "Solution-Aware" else "חשיפה"}",',
+        f'  "content_type": "{"sale" if awareness_stage == "Solution-Aware" else "exposure"}",',
         f'  "awareness_stage": "{awareness_stage}",',
         '  "magnet_id": ' + (f'"{magnet_id}"' if magnet_id else 'null'),
         "}",
@@ -202,7 +218,8 @@ AGENT_SYSTEM_PROMPT = """את וונדי — עוזרת AI לבעלות עסקי
 - תמיד בעברית
 - אל תגידי "פרסמתי" או "שלחתי לאינסטגרם"
 - אל תציגי JSON, פרטי לקוחה, או מזהי רשומות
-- אסור "סיימתי את המשימה" בלי להציג תוצאות"""
+- אסור "סיימתי את המשימה" בלי להציג תוצאות
+- חשוב מאוד: אם המשתמשת ביקשה X רילסים, חובה לקרוא ל-write_reel בדיוק X פעמים. אל תסיימי לפני שכל הרילסים נכתבו."""
 
 # ── Constant Prompt Sections ─────────────────────────────────────────────────
 

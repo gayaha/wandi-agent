@@ -383,6 +383,34 @@ async def _fetch_all_data(
 # ── Record building ──────────────────────────────────────────────────────────
 
 
+def _validate_magnet_id(magnet_id: str | None, client_id: str) -> str | None:
+    """Validate a magnet_id before saving to Airtable.
+
+    Returns the magnet_id if valid, or None if invalid.
+    Catches the known bug where GLM puts client_id in the magnet_id field.
+    """
+    if not magnet_id:
+        return None
+
+    # Must look like an Airtable record ID
+    if not magnet_id.startswith("rec"):
+        logger.warning(
+            f"[MagnetValidation] Invalid magnet_id '{magnet_id}' "
+            f"(doesn't start with 'rec') — removed"
+        )
+        return None
+
+    # Must NOT be the client_id (GLM's most common hallucination)
+    if magnet_id == client_id:
+        logger.warning(
+            f"[MagnetValidation] magnet_id '{magnet_id}' is the client_id — "
+            f"GLM hallucinated. Removed."
+        )
+        return None
+
+    return magnet_id
+
+
 def _build_queue_record(
     reel: dict[str, Any], client_id: str
 ) -> dict[str, Any]:
@@ -398,8 +426,9 @@ def _build_queue_record(
         "Status": "Draft",
         "Source": "wandi-agent",
     }
-    if reel.get("magnet_id"):
-        record["Selected Magnet"] = [reel["magnet_id"]]
+    validated_magnet = _validate_magnet_id(reel.get("magnet_id"), client_id)
+    if validated_magnet:
+        record["Selected Magnet"] = [validated_magnet]
     return record
 
 

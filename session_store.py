@@ -164,20 +164,25 @@ async def update_session_title(session_id: str, title: str) -> None:
 
 async def close_session(session_id: str) -> None:
     """Mark a session as complete."""
+    await update_session_status(session_id, "complete")
+
+
+async def update_session_status(session_id: str, status: str) -> None:
+    """Update session status: 'active' | 'processing' | 'complete' | 'error'."""
     try:
         client = _get_client()
         now = datetime.now(timezone.utc).isoformat()
         await _run_sync(
             lambda: (
                 client.table("agent_sessions")
-                .update({"status": "complete", "updated_at": now})
+                .update({"status": status, "updated_at": now})
                 .eq("id", session_id)
                 .execute()
             )
         )
-        logger.info(f"Closed session {session_id}")
+        logger.info(f"Session {session_id} status → {status}")
     except Exception as e:
-        logger.error(f"Failed to close session: {e}")
+        logger.error(f"Failed to update session {session_id} status to {status}: {e}")
 
 
 # ── Messages ─────────────────────────────────────────────────────────────────
