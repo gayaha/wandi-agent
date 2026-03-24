@@ -642,6 +642,26 @@ async def _handle_render_and_publish(
             except Exception as e:
                 logger.error(f"[render_and_publish] Airtable attachment failed: {e}")
 
+            # Insert into Supabase content_projects for frontend display
+            try:
+                sb = supabase_client._get_client()
+                sb.table("content_projects").insert({
+                    "user_id": user_id,
+                    "client_airtable_id": client_id,
+                    "client_name": _client_cache.get(client_id, {}).get("name", ""),
+                    "hook": reel.get("hook", ""),
+                    "caption": reel.get("caption", ""),
+                    "video_text": reel.get("text_on_video"),
+                    "hook_type": reel.get("hook_type"),
+                    "awareness_stage": reel.get("awareness_stage"),
+                    "status": "draft",
+                    "airtable_record_id": record_id,
+                    "source_video_url": source_url,
+                    "processed_video_url": final_url,
+                }).execute()
+            except Exception as e:
+                logger.error(f"[render_and_publish] Failed to insert content_project: {e}")
+
             return True
 
         except Exception as e:
