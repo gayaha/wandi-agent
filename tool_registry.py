@@ -379,6 +379,14 @@ async def _handle_write_reel(
                 logger.error("[write_reel] Dicta translation failed after 2 attempts, skipping reel")
                 return {"error": "תרגום לעברית נכשל — הריל לא נשמר"}
 
+            # If draft_index provided, update existing draft in agent_drafts
+            draft_index = kwargs.get("draft_index")
+            session_id = kwargs.get("session_id", "")
+            if draft_index and session_id:
+                import session_store
+                await session_store.update_draft(session_id, draft_index, reel)
+                logger.info(f"[write_reel] Updated draft {draft_index} in session {session_id}")
+
             return {"success": True, "reel": reel}
         return {"error": "תשובה לא תקינה מהמודל"}
     except ValueError as e:
@@ -599,6 +607,14 @@ TOOLS: list[Tool] = [
             "magnet_id": {
                 "type": "string",
                 "description": "Airtable magnet record ID (for Solution-Aware only)",
+            },
+            "draft_index": {
+                "type": "integer",
+                "description": "Index of the draft to update (1-based). Use when rewriting a specific draft.",
+            },
+            "session_id": {
+                "type": "string",
+                "description": "Current session ID. Required when updating a draft (draft_index).",
             },
         },
         handler=_handle_write_reel,
