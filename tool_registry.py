@@ -816,6 +816,23 @@ TOOLS: list[Tool] = [
         handler=_handle_approve_and_save,
     ),
     Tool(
+        name="render_and_publish",
+        description=(
+            "מרנדר סרטוני רילס מטיוטות מאושרות. קרא לכלי הזה רק כשהמשתמשת "
+            "מאשרת את הטיוטות ומבקשת לרנדר/ליצור סרטונים. הכלי: שומר ב-Airtable, "
+            "בוחר סרטוני רקע, מרנדר mp4, ומעלה לדף התוכן. "
+            "⚠️ הפעולה לוקחת 2-5 דקות. עדכן את המשתמשת שהרינדור התחיל."
+        ),
+        parameters={
+            "session_id": {
+                "type": "string",
+                "description": "The current session ID",
+                "required": True,
+            },
+        },
+        handler=_handle_render_and_publish,
+    ),
+    Tool(
         name="get_insights",
         description="שולף תובנות ביצועים לנישה — סוגי הוקים מובילים, שעות פרסום, מעורבות.",
         parameters={
