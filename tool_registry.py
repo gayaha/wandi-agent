@@ -656,7 +656,7 @@ async def _handle_render_and_publish(
                     "awareness_stage": reel.get("awareness_stage"),
                     "status": "draft",
                     "airtable_record_id": record_id,
-                    "source_video_url": source_url,
+                    "source_video_url": video_url,
                     "processed_video_url": final_url,
                 }).execute()
             except Exception as e:
