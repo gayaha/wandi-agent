@@ -648,15 +648,17 @@ async def _handle_render_and_publish(
             logger.error(f"[render_and_publish] Render failed for reel {idx + 1}: {e}")
             return False
 
-    # Run renders with concurrency (2 at a time, like Path B)
-    results = await asyncio.gather(
-        *[_render_one(i) for i in range(len(saved_records))]
-    )
-    rendered_count = sum(1 for r in results if r)
+    # Run renders sequentially (one at a time) to avoid download/upload
+    # bandwidth pressure that causes timeouts with concurrent renders.
+    rendered_count = 0
+    for i in range(len(saved_records)):
+        if await _render_one(i):
+            rendered_count += 1
 
-    # 7. Mark drafts as saved
-    draft_indices = [d.get("draft_index") for d in drafts if d.get("status") == "pending"]
-    await session_store.mark_drafts_saved(session_id, draft_indices)
+    # 7. Mark drafts as saved — only if at least one render succeeded
+    if rendered_count > 0:
+        draft_indices = [d.get("draft_index") for d in drafts if d.get("status") == "pending"]
+        await session_store.mark_drafts_saved(session_id, draft_indices)
 
     return {
         "success": True,
