@@ -543,12 +543,15 @@ async def _handle_render_and_publish(
         }
 
     # 3. Save to Airtable Content Queue → get record_ids
+    # Track which original draft index each saved record corresponds to
     queue_records = [agent_module._build_queue_record(r, client_id) for r in reels]
     saved_records = []
+    saved_draft_map: list[int] = []  # saved_records[i] came from drafts[saved_draft_map[i]]
     for i, rec in enumerate(queue_records):
         try:
             result = await at.save_reels_to_queue([rec])
             saved_records.extend(result)
+            saved_draft_map.append(i)
         except Exception as e:
             logger.error(f"[render_and_publish] Failed to save reel {i + 1}: {e}")
     if not saved_records:
@@ -575,7 +578,9 @@ async def _handle_render_and_publish(
     async def _render_one(idx: int) -> bool:
         """Render a single reel. Returns True on success."""
         record = saved_records[idx]
-        reel = reels[idx] if idx < len(reels) else {}
+        # Map back to original draft/reel index (they may differ if some saves failed)
+        original_idx = saved_draft_map[idx] if idx < len(saved_draft_map) else idx
+        reel = reels[original_idx] if original_idx < len(reels) else {}
         video_url = video_urls[idx] if idx < len(video_urls) else None
         record_id = record.get("id", "")
 
@@ -671,14 +676,22 @@ async def _handle_render_and_publish(
     # Run renders sequentially (one at a time) to avoid download/upload
     # bandwidth pressure that causes timeouts with concurrent renders.
     rendered_count = 0
+    rendered_indices: list[int] = []  # Track which draft_indices rendered OK
     for i in range(len(saved_records)):
         if await _render_one(i):
             rendered_count += 1
+            # Map saved_record index → original draft index → draft_index value
+            original_idx = saved_draft_map[i] if i < len(saved_draft_map) else i
+            if original_idx < len(drafts):
+                rendered_indices.append(drafts[original_idx].get("draft_index", original_idx + 1))
 
-    # 7. Mark drafts as saved — only if at least one render succeeded
-    if rendered_count > 0:
-        draft_indices = [d.get("draft_index") for d in drafts if d.get("status") == "pending"]
-        await session_store.mark_drafts_saved(session_id, draft_indices)
+    # 7. Mark only successfully rendered drafts as saved
+    if rendered_indices:
+        await session_store.mark_drafts_saved(session_id, rendered_indices)
+        logger.info(f"[render_and_publish] Marked {len(rendered_indices)} drafts as saved: {rendered_indices}")
+    if len(rendered_indices) < len(drafts):
+        failed = [d.get("draft_index") for d in drafts if d.get("draft_index") not in rendered_indices]
+        logger.warning(f"[render_and_publish] Drafts NOT rendered (still pending): {failed}")
 
     return {
         "success": True,
