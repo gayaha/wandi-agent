@@ -87,6 +87,7 @@ async def _handle_get_client_profile(client_id: str, **kwargs) -> dict[str, Any]
     _client_cache[client_id] = {
         "name": (fields.get("Client Name") or "").strip(),
         "email": (fields.get("email") or "").strip(),
+        "niche_ids": fields.get("Niche") or [],
     }
     logger.info(
         f"Client cache populated: {client_id} → "
@@ -131,6 +132,19 @@ async def _handle_get_hooks(
     **kwargs,
 ) -> list[dict]:
     """Fetch viral hooks filtered by niche."""
+    # Override niche_ids from client cache — GLM sometimes sends
+    # client_id instead of actual niche record IDs
+    client_id = kwargs.get("authorized_client_id", "")
+    if client_id and client_id in _client_cache:
+        cached_niche_ids = _client_cache[client_id].get("niche_ids", [])
+        if cached_niche_ids:
+            if niche_ids and client_id in niche_ids:
+                logger.warning(
+                    f"get_hooks: GLM sent client_id '{client_id}' as niche_id, "
+                    f"using cached niche_ids: {cached_niche_ids}"
+                )
+            niche_ids = cached_niche_ids
+
     hooks = await at.get_viral_hooks(niche_ids or [], limit=min(limit, 20))
     result = []
     for h in hooks:
