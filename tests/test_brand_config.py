@@ -161,7 +161,7 @@ def test_extract_brand_config_multiple_fields():
         "id": "rec1",
         "fields": {
             "Brand Primary Color": "#FF0000",
-            "Brand Font Family": "Rubik",
+            "Font Name": "Rubik",
             "Brand Hook Font Size": 60,
             "Brand Overlay Opacity": 0.5,
         },

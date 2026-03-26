@@ -482,7 +482,7 @@ class TestBrandConfig:
     @pytest.mark.asyncio
     async def test_render_with_client_id_fetches_brand(self, app_client):
         """POST /render with client_id calls at.get_client and at.extract_brand_config."""
-        client_record = {"id": "recTEST", "fields": {"Brand Primary Color": "#FF0000", "Brand Font Family": "Rubik"}}
+        client_record = {"id": "recTEST", "fields": {"Brand Primary Color": "#FF0000", "Font Name": "Rubik"}}
         brand_config = BrandConfig(primary_color="#FF0000", font_family="Rubik")
 
         with patch("main.get_renderer") as mock_get_renderer, \

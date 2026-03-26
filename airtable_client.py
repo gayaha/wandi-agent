@@ -395,7 +395,7 @@ def extract_brand_config(client_record: dict[str, Any]) -> BrandConfig:
     _FIELD_MAP = {
         "Brand Primary Color": "primary_color",
         "Brand Secondary Color": "secondary_color",
-        "Brand Font Family": "font_family",
+        "Font Name": "font_family",
         "Brand Hook Font Size": "hook_font_size",
         "Brand Body Font Size": "body_font_size",
         "Brand Overlay Color": "overlay_color",
