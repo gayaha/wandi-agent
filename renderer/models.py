@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_FONTS = {"Heebo", "Assistant", "Rubik", "Frank Ruhl Libre"}
+ALLOWED_FONTS = {"Heebo", "Assistant", "Rubik", "Frank Ruhl Libre", "Ploni", "ploni"}
 
 
 class TextSegment(BaseModel):
