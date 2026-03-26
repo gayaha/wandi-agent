@@ -21,25 +21,18 @@ export function resolveRoleStyle(
   role: "hook" | "body" | "cta",
   brand?: BrandConfig
 ): { color: string; fontSize: number; fontWeight: number } {
+  // All roles use the same size and weight for uniform look
+  const fontSize = brand?.hookFontSize ?? 52;
+  const fontWeight = brand?.hookFontWeight ?? 700;
+  const color = "#FFFFFF";
+
   switch (role) {
     case "hook":
-      return {
-        color: brand?.primaryColor ?? "#FFFFFF",
-        fontSize: brand?.hookFontSize ?? 52,
-        fontWeight: brand?.hookFontWeight ?? 700,
-      };
+      return { color, fontSize, fontWeight };
     case "body":
-      return {
-        color: brand?.secondaryColor ?? "#FFFFFF",
-        fontSize: brand?.bodyFontSize ?? 36,
-        fontWeight: 400,
-      };
+      return { color, fontSize, fontWeight };
     case "cta":
-      return {
-        color: brand?.primaryColor ?? "#FFFFFF",
-        fontSize: brand?.bodyFontSize ?? 36,
-        fontWeight: 700,
-      };
+      return { color, fontSize, fontWeight };
   }
 }
 
@@ -113,15 +106,9 @@ export const SegmentOverlay: React.FC<SegmentOverlayProps> = ({
     primaryColor: roleStyle.color,
   });
 
-  // Build overlay box style using shared helper from TextOverlay
-  const overlayBoxBase = getOverlayBoxStyle({
-    overlayColor: brandConfig?.overlayColor,
-    overlayOpacity: brandConfig?.overlayOpacity,
-    borderRadius: brandConfig?.borderRadius,
-  });
-
+  // Transparent overlay — text stands on its own with stroke + shadow
   const overlayBoxStyle: React.CSSProperties = {
-    ...overlayBoxBase,
+    background: "transparent",
     padding: "24px 32px",
     opacity,
     transform: animationStyle === "slide" ? `translateY(${translateY}px)` : undefined,
@@ -131,6 +118,9 @@ export const SegmentOverlay: React.FC<SegmentOverlayProps> = ({
     ...textContainerStyle,
     fontSize: roleStyle.fontSize,
     fontWeight: roleStyle.fontWeight,
+    WebkitTextStroke: "2px #000000",
+    paintOrder: "stroke fill",
+    textShadow: "2px 2px 4px rgba(0,0,0,0.8)",
   };
 
   return (
