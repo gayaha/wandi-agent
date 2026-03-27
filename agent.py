@@ -19,8 +19,26 @@ BATCH_TYPES = {"חשיפה", "מכירה", "מעורב"}
 # Select fields expect specific strings.  These maps ensure both sources
 # always produce the correct Airtable option.
 #
-# Hook Types are now dynamic — whatever exists in Airtable is accepted.
-# No hardcoded _VALID_HOOK_TYPES or _HOOK_TYPE_MAP needed.
+# Hook Types must map to Airtable's closed select-option list.
+# Unmapped values default to "פרובוקציה" (the most common type).
+_HOOK_TYPE_MAP: dict[str, str] = {
+    "פרובוקציה": "פרובוקציה",
+    "שאלה מאתגרת": "שאלה מאתגרת",
+    "טעות נפוצה": "טעות נפוצה",
+    "סוד חשיפה": "סוד חשיפה",
+    "סוד/חשיפה": "סוד חשיפה",
+    "זיהוי קהל": "זיהוי קהל",
+    "תוצאה מפתיעה": "תוצאה מפתיעה",
+    "מספר + הבטחה": "פרובוקציה",
+    # English variants the LLM sometimes produces
+    "provocation": "פרובוקציה",
+    "question": "שאלה מאתגרת",
+    "mistake": "טעות נפוצה",
+    "secret": "סוד חשיפה",
+    "identity": "זיהוי קהל",
+    "surprise": "תוצאה מפתיעה",
+    "number": "פרובוקציה",
+}
 
 _CONTENT_TYPE_AIRTABLE: dict[str, str] = {
     "חשיפה": "חשיפה",
@@ -249,12 +267,16 @@ def _validate_and_fix_reel(
                 logger.warning(f"[Validation] {tag}: missing trigger word '{trigger}' — appending CTA")
                 reel["caption"] = caption.rstrip() + f"\n\nתגיבו '{trigger}' ותקבלו את זה בהודעה 👇"
 
-    # 4. Hook type — accept any non-empty value (dynamic from Airtable)
+    # 4. Hook type — normalize to valid Airtable select options
     raw_ht = (reel.get("hook_type") or "").strip().strip('"').strip("'").strip()
-    if not raw_ht:
-        raw_ht = "כללי"
-        logger.warning(f"[Validation] {tag}: empty hook_type → defaulting to 'כללי'")
-    reel["hook_type"] = raw_ht
+    normalized_ht = _HOOK_TYPE_MAP.get(raw_ht)
+    if not normalized_ht:
+        # Try case-insensitive match
+        normalized_ht = _HOOK_TYPE_MAP.get(raw_ht.lower())
+    if not normalized_ht:
+        logger.warning(f"[Validation] {tag}: unknown hook_type '{raw_ht}' → defaulting to 'פרובוקציה'")
+        normalized_ht = "פרובוקציה"
+    reel["hook_type"] = normalized_ht
 
     # 5. Unaware → hook_only (text_on_video should be null)
     if reel["awareness_stage"] == "Unaware" and reel.get("text_on_video"):
@@ -383,6 +405,34 @@ async def _fetch_all_data(
 # ── Record building ──────────────────────────────────────────────────────────
 
 
+def _validate_magnet_id(magnet_id: str | None, client_id: str) -> str | None:
+    """Validate a magnet_id before saving to Airtable.
+
+    Returns the magnet_id if valid, or None if invalid.
+    Catches the known bug where GLM puts client_id in the magnet_id field.
+    """
+    if not magnet_id:
+        return None
+
+    # Must look like an Airtable record ID
+    if not magnet_id.startswith("rec"):
+        logger.warning(
+            f"[MagnetValidation] Invalid magnet_id '{magnet_id}' "
+            f"(doesn't start with 'rec') — removed"
+        )
+        return None
+
+    # Must NOT be the client_id (GLM's most common hallucination)
+    if magnet_id == client_id:
+        logger.warning(
+            f"[MagnetValidation] magnet_id '{magnet_id}' is the client_id — "
+            f"GLM hallucinated. Removed."
+        )
+        return None
+
+    return magnet_id
+
+
 def _build_queue_record(
     reel: dict[str, Any], client_id: str
 ) -> dict[str, Any]:
@@ -390,7 +440,10 @@ def _build_queue_record(
     record: dict[str, Any] = {
         "Client": [client_id],
         "Hook": reel.get("hook") or "",
-        "Hook Type": (reel.get("hook_type") or "כללי").strip(),
+        "Hook Type": _HOOK_TYPE_MAP.get(
+            (reel.get("hook_type") or "").strip().strip('"').strip("'").strip(),
+            "פרובוקציה",
+        ),
         "text on video": reel.get("text_on_video") or "",
         "Caption": reel.get("caption") or "",
         "Content Type": _normalize(reel.get("content_type") or "", _CONTENT_TYPE_AIRTABLE),
@@ -398,8 +451,9 @@ def _build_queue_record(
         "Status": "Draft",
         "Source": "wandi-agent",
     }
-    if reel.get("magnet_id"):
-        record["Selected Magnet"] = [reel["magnet_id"]]
+    validated_magnet = _validate_magnet_id(reel.get("magnet_id"), client_id)
+    if validated_magnet:
+        record["Selected Magnet"] = [validated_magnet]
     return record
 
 

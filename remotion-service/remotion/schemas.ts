@@ -14,7 +14,7 @@ export const BrandConfigSchema = z.object({
   primaryColor: z.string().default("#FFFFFF"),
   secondaryColor: z.string().default("#FFFFFF"),
   fontFamily: z
-    .enum(["Heebo", "Assistant", "Rubik", "Frank Ruhl Libre"])
+    .enum(["Heebo", "Assistant", "Rubik", "Frank Ruhl Libre", "Ploni", "ploni"])
     .default("Heebo"),
   hookFontSize: z.number().int().min(20).max(120).default(52),
   bodyFontSize: z.number().int().min(14).max(80).default(36),

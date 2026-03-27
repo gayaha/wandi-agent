@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Header, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,7 @@ import session_store
 import supabase_client
 import user_resolver
 import video_picker
+from rate_limiter import check_rate_limit
 from renderer import get_renderer, RenderRequest, JobStatus, BrandConfig
 from renderer.brand import resolve_brand_for_render
 
@@ -521,6 +522,69 @@ async def _run_render(job_id: str, request: RenderRequest):
                 logger.exception(f"Failed to send error callback for {job_id}")
 
 
+# ── Auth middleware ──────────────────────────────────────────────────────────
+
+# API key for service-to-service calls (n8n → wandi-agent).
+# Falls back to "" which disables API key auth (only JWT accepted).
+_SERVICE_API_KEY = os.environ.get("WANDI_SERVICE_API_KEY", "").strip()
+
+
+async def get_current_user(authorization: str = Header(default="")) -> dict:
+    """Validate Supabase JWT from Authorization header.
+
+    Returns {"user_id": str, "email": str}.
+    Raises 401 if token is invalid or missing.
+    """
+    if not authorization:
+        logger.warning("[Auth] Missing Authorization header")
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    token = authorization.replace("Bearer ", "").strip()
+    if not token:
+        logger.warning("[Auth] Empty token after stripping Bearer prefix")
+        raise HTTPException(status_code=401, detail="Empty token")
+
+    logger.debug(f"[Auth] Validating token: {token[:20]}...")
+    user_info = await user_resolver.validate_supabase_token(token)
+    if not user_info:
+        logger.warning(f"[Auth] Token validation failed for token: {token[:20]}...")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return user_info
+
+
+async def require_service_auth(
+    authorization: str = Header(default=""),
+    x_api_key: str = Header(default="", alias="X-API-Key"),
+) -> dict:
+    """Authenticate a service-to-service call.
+
+    Accepts EITHER:
+    - A valid Supabase JWT (Bearer token) — same as get_current_user
+    - A valid API key in X-API-Key header — for n8n and internal services
+
+    Returns {"user_id": str, "email": str} for JWT auth, or
+    {"user_id": "service", "email": "service@wandi.internal"} for API key auth.
+
+    Raises 401 if neither is valid.
+    """
+    # Try API key first (fast path for n8n / internal services)
+    if x_api_key and _SERVICE_API_KEY and x_api_key == _SERVICE_API_KEY:
+        logger.debug("[Auth] Service API key accepted")
+        return {"user_id": "service", "email": "service@wandi.internal"}
+
+    # Fall back to JWT
+    if authorization:
+        token = authorization.replace("Bearer ", "").strip()
+        if token:
+            user_info = await user_resolver.validate_supabase_token(token)
+            if user_info:
+                return user_info
+
+    logger.warning("[Auth] Service auth failed: no valid API key or JWT")
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -543,8 +607,9 @@ async def list_models():
 
 
 @app.post("/generate", response_model=GenerateResponse)
-async def generate(request: GenerateRequest):
-    """Synchronous generation — blocks until complete."""
+async def generate(request: GenerateRequest, _auth: dict = Depends(require_service_auth)):
+    """Synchronous generation — blocks until complete. Requires JWT or API key."""
+    check_rate_limit(_auth.get("user_id", "unknown"))
     logger.info(
         f"Generate request: client={request.client_id}, "
         f"type={request.batch_type}, qty={request.quantity}"
@@ -565,8 +630,9 @@ async def generate(request: GenerateRequest):
 
 
 @app.post("/render", status_code=202)
-async def submit_render(request: RenderRequest):
-    """Accept a render job, return immediately with job_id, kick off background task."""
+async def submit_render(request: RenderRequest, _auth: dict = Depends(require_service_auth)):
+    """Accept a render job, return immediately with job_id. Requires JWT or API key."""
+    check_rate_limit(_auth.get("user_id", "unknown"))
     job_id = str(uuid.uuid4())
     _render_jobs[job_id] = {
         "job_id": job_id,
@@ -583,8 +649,8 @@ async def submit_render(request: RenderRequest):
 
 
 @app.get("/render-status/{job_id}")
-async def get_render_status(job_id: str):
-    """Return current state of a render job, or 404 if not found."""
+async def get_render_status(job_id: str, _auth: dict = Depends(require_service_auth)):
+    """Return current state of a render job, or 404 if not found. Requires JWT or API key."""
     job = _render_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -592,8 +658,9 @@ async def get_render_status(job_id: str):
 
 
 @app.post("/generate-async", status_code=202)
-async def generate_async(request: GenerateAsyncRequest):
-    """Async generation — returns immediately, POSTs results to callback_url."""
+async def generate_async(request: GenerateAsyncRequest, _auth: dict = Depends(require_service_auth)):
+    """Async generation — returns immediately, POSTs results to callback_url. Requires JWT or API key."""
+    check_rate_limit(_auth.get("user_id", "unknown"))
     logger.info(
         f"Async generate request: client={request.client_id}, "
         f"type={request.batch_type}, qty={request.quantity}, "
@@ -616,33 +683,6 @@ async def generate_async(request: GenerateAsyncRequest):
     }
 
 
-# ── Auth middleware ──────────────────────────────────────────────────────────
-
-
-async def get_current_user(authorization: str = Header(default="")) -> dict:
-    """Validate Supabase JWT from Authorization header.
-
-    Returns {"user_id": str, "email": str}.
-    Raises 401 if token is invalid or missing.
-    """
-    if not authorization:
-        logger.warning("[Auth] Missing Authorization header")
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-    token = authorization.replace("Bearer ", "").strip()
-    if not token:
-        logger.warning("[Auth] Empty token after stripping Bearer prefix")
-        raise HTTPException(status_code=401, detail="Empty token")
-
-    logger.info(f"[Auth] Validating token: {token[:20]}...")
-    user_info = await user_resolver.validate_supabase_token(token)
-    if not user_info:
-        logger.warning(f"[Auth] Token validation failed for token: {token[:20]}...")
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    return user_info
-
-
 # ── Agent endpoints ──────────────────────────────────────────────────────────
 
 class AgentChatRequest(BaseModel):
@@ -662,25 +702,64 @@ class AgentChatResponse(BaseModel):
     error: bool = False
 
 
-@app.post("/agent/chat", response_model=AgentChatResponse)
+async def _run_agent_background(
+    session_id: str,
+    user_id: str,
+    client_id: str,
+    message: str,
+    session: dict,
+) -> None:
+    """Run the agent pipeline in the background (async mode only).
+
+    Updates session status to 'complete' or 'error' when done.
+    run_agent already saves its assistant response to Supabase,
+    so this function only manages status transitions.
+    """
+    import agent_engine
+
+    try:
+        await agent_engine.run_agent(
+            user_message=message,
+            client_id=client_id,
+            session=session,
+            user_id=user_id,
+        )
+        await session_store.update_session_status(session_id, "complete")
+        logger.info(f"[Agent Background] Completed session {session_id}")
+    except Exception as e:
+        logger.error(
+            f"[Agent Background] Failed for session {session_id}: {e}",
+            exc_info=True,
+        )
+        await session_store.update_session_status(session_id, "error")
+        # Save error message so polling can return it to the user
+        await session_store.save_message(
+            session_id, "assistant", "מצטערת, משהו השתבש. נסי שוב.",
+        )
+
+
+@app.post("/agent/chat")
 async def agent_chat(
     request: AgentChatRequest,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
+    async_mode: bool = Query(False, alias="async"),
 ):
     """Agentic chat — the LLM decides what tools to call.
 
     Requires Authorization: Bearer <supabase_token> header.
-    The agent will:
-    1. Resolve the user's client profile from their email
-    2. Understand the request
-    3. Pick the right tools (fetch data, generate content, etc.)
-    4. Execute them autonomously
-    5. Return a response with results
+
+    Without ?async=true: blocks until the agent finishes (existing behavior).
+    With ?async=true: returns immediately with session_id + status="processing",
+    and the agent runs in the background. Use /agent/sessions/{id}/poll to check.
     """
     import agent_engine
 
     user_id = current_user["user_id"]
     user_email = current_user.get("email")
+
+    # Rate limit — prevent burst attacks that exhaust GPU
+    check_rate_limit(user_id)
 
     # Check quota before processing
     quota_status = await quota_module.check_quota(user_id)
@@ -706,38 +785,110 @@ async def agent_chat(
 
     logger.info(
         f"[Agent Chat] user={user_id}, client={client_id}, "
-        f"message={request.message[:100]}..., session={request.session_id}"
-    )
-
-    session = await agent_engine.get_or_create_session(
-        user_id=user_id,
-        client_id=client_id,
-        session_id=request.session_id,
+        f"message={request.message[:100]}..., session={request.session_id}, "
+        f"async={async_mode}"
     )
 
     try:
-        result = await agent_engine.run_agent(
-            user_message=request.message,
+        session = await agent_engine.get_or_create_session(
+            user_id=user_id,
             client_id=client_id,
+            session_id=request.session_id,
+        )
+    except PermissionError:
+        raise HTTPException(
+            status_code=403,
+            detail="Session not found or access denied",
+        )
+
+    session_id = session["id"]
+
+    if async_mode:
+        # ── Async mode: return immediately, run agent in background ──
+        await quota_module.consume_message(user_id)
+        await session_store.update_session_status(session_id, "processing")
+
+        background_tasks.add_task(
+            _run_agent_background,
+            session_id=session_id,
+            user_id=user_id,
+            client_id=client_id,
+            message=request.message,
             session=session,
         )
 
-        # Consume quota after successful response
-        await quota_module.consume_message(user_id)
+        return {
+            "session_id": session_id,
+            "status": "processing",
+            "message": "הבקשה התקבלה, מעבד...",
+        }
 
-        return AgentChatResponse(
-            session_id=result.session_id,
-            response=result.response,
-            steps=result.steps,
-            tools_used=[tc.tool_name for tc in result.tool_calls],
-            total_duration_ms=result.total_duration_ms,
-            error=result.error,
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"[Agent Chat] Failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Agent failed: {e}")
+    else:
+        # ── Sync mode: existing behavior, blocks until done ──
+        try:
+            result = await agent_engine.run_agent(
+                user_message=request.message,
+                client_id=client_id,
+                session=session,
+                user_id=user_id,
+            )
+
+            # Consume quota after successful response
+            await quota_module.consume_message(user_id)
+
+            return AgentChatResponse(
+                session_id=result.session_id,
+                response=result.response,
+                steps=result.steps,
+                tools_used=[tc.tool_name for tc in result.tool_calls],
+                total_duration_ms=result.total_duration_ms,
+                error=result.error,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"[Agent Chat] Failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Agent failed: {e}")
+
+
+@app.get("/agent/sessions/{session_id}/poll")
+async def poll_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Poll an async agent session for completion.
+
+    Returns status + full response when complete.
+    Frontend calls this every 5-10 seconds after POST /agent/chat?async=true.
+    """
+    user_id = current_user["user_id"]
+
+    # Security: verify session belongs to user
+    session = await session_store.get_session(session_id)
+    if not session or session.get("user_id") != user_id:
+        raise HTTPException(403, "Session not found or access denied")
+
+    status = session.get("status", "active")
+
+    if status in ("complete", "error"):
+        # Fetch the last assistant message
+        messages = await session_store.get_messages(session_id)
+        assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+        last_msg = assistant_msgs[-1] if assistant_msgs else {}
+
+        return {
+            "status": status,
+            "session_id": session_id,
+            "response": last_msg.get("content", ""),
+            "tools_used": [],
+            "total_duration_ms": last_msg.get("duration_ms", 0),
+        }
+
+    # Still processing
+    return {
+        "status": "processing",
+        "session_id": session_id,
+    }
 
 
 @app.get("/agent/sessions")
@@ -778,11 +929,24 @@ async def get_agent_quota(current_user: dict = Depends(get_current_user)):
 
 
 @app.get("/agent/session/{session_id}")
-async def get_agent_session(session_id: str):
-    """Get the current state of an agent session (legacy endpoint)."""
+async def get_agent_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get the current state of an agent session.
+
+    Now requires authentication and validates session ownership.
+    """
     session = await session_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Security: verify session belongs to authenticated user
+    if session.get("user_id") != current_user["user_id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Session not found or access denied",
+        )
 
     messages = await session_store.get_messages(session_id)
     return {
@@ -845,8 +1009,8 @@ class PickVideoRequest(BaseModel):
 
 
 @app.post("/pick-video")
-async def pick_video(request: PickVideoRequest):
-    """Pick a random source video from the user's raw-media library."""
+async def pick_video(request: PickVideoRequest, _auth: dict = Depends(require_service_auth)):
+    """Pick a random source video from the user's raw-media library. Requires JWT or API key."""
     url = supabase_client.pick_random_source_video(request.user_id)
     return {"video_url": url}
 

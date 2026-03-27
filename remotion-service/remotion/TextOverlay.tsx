@@ -134,32 +134,35 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
     primaryColor,
   });
 
-  const { backgroundColor, borderRadius: br } = getOverlayBoxStyle({
-    overlayColor,
-    overlayOpacity,
-    borderRadius,
-  });
-
+  // Transparent overlay — text stands on its own with stroke + shadow
   const overlayBoxStyle: React.CSSProperties = {
-    backgroundColor,
-    borderRadius: br,
+    background: "transparent",
     padding: "24px 32px",
     opacity,
     transform: animationStyle === "slide" ? `translateY(${translateY}px)` : undefined,
   };
 
+  const textStrokeStyle: React.CSSProperties = {
+    WebkitTextStroke: "2px #000000",
+    paintOrder: "stroke fill",
+    textShadow: "2px 2px 4px rgba(0,0,0,0.8)",
+  };
+
   const hookStyle: React.CSSProperties = {
     ...containerStyle,
+    ...textStrokeStyle,
     fontSize: hookFontSize ?? 52,
     fontWeight: hookFontWeight ?? 700,
+    color: "#FFFFFF",
     marginBottom: 16,
   };
 
   const bodyStyle: React.CSSProperties = {
     ...containerStyle,
-    fontSize: bodyFontSize ?? 36,
-    fontWeight: 400,
-    color: secondaryColor ?? "#FFFFFF",
+    ...textStrokeStyle,
+    fontSize: hookFontSize ?? 52,
+    fontWeight: hookFontWeight ?? 700,
+    color: "#FFFFFF",
   };
 
   return (

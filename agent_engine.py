@@ -53,10 +53,26 @@ async def get_or_create_session(
     """Get existing session or create a new one in Supabase.
 
     Returns a session dict with keys: id, user_id, client_id, title, status.
+
+    Security: when an existing session_id is provided, we verify that the
+    session's user_id matches the authenticated user. This prevents
+    user A from accessing user B's session by guessing/sending a session_id.
+
+    Raises:
+        PermissionError: If the session belongs to a different user.
     """
     if session_id:
         existing = await session_store.get_session(session_id)
         if existing:
+            if existing.get("user_id") != user_id:
+                logger.warning(
+                    f"Session ownership mismatch: session {session_id} "
+                    f"belongs to {existing.get('user_id')}, "
+                    f"but user {user_id} tried to access it"
+                )
+                raise PermissionError(
+                    "Session not found or access denied"
+                )
             return existing
 
     # Create new session
@@ -76,6 +92,7 @@ async def run_agent(
     client_id: str,
     session: dict,
     system_prompt: str | None = None,
+    user_id: str = "",
 ) -> AgentResult:
     """Run the agent loop — LLM decides what tools to call.
 
@@ -94,6 +111,9 @@ async def run_agent(
         system_prompt: Optional custom system prompt override.
     """
     session_id = session["id"]
+
+    # Clear client cache at the start of each agent run to ensure fresh data
+    tool_registry.clear_client_cache()
 
     # Use the agent system prompt from prompts.py, with client context injected
     if system_prompt is None:
@@ -151,44 +171,69 @@ async def run_agent(
             total_ms = int((time.time() - start_time) * 1000)
             final_response = content or ""
 
-            # If LLM gave empty/generic response but we have reel results,
-            # format them ourselves instead of showing "סיימתי את המשימה"
-            if (not final_response or "סיימתי" in final_response) and all_tool_calls:
-                # Collect all reels from write_reel calls
-                reels = []
-                for tc in all_tool_calls:
-                    if tc.tool_name == "write_reel" and isinstance(tc.result, dict):
-                        reel = tc.result.get("result", {}).get("reel")
-                        if reel:
-                            reels.append(reel)
+            # Always collect reels from write_reel calls (regardless of LLM response)
+            reels = []
+            for tc in all_tool_calls:
+                if tc.tool_name == "write_reel" and isinstance(tc.result, dict):
+                    reel = tc.result.get("result", {}).get("reel")
+                    if reel:
+                        reels.append(reel)
 
-                # Also check for draft_content results (backward compat)
-                if not reels:
-                    draft_tc = next(
-                        (tc for tc in all_tool_calls if tc.tool_name == "draft_content"),
-                        None,
-                    )
-                    if draft_tc and isinstance(draft_tc.result, dict):
-                        for d in draft_tc.result.get("result", {}).get("drafts", []):
-                            reels.append(d)
+            # Also check for draft_content results (backward compat)
+            if not reels:
+                draft_tc = next(
+                    (tc for tc in all_tool_calls if tc.tool_name == "draft_content"),
+                    None,
+                )
+                if draft_tc and isinstance(draft_tc.result, dict):
+                    for d in draft_tc.result.get("result", {}).get("drafts", []):
+                        reels.append(d)
 
-                if reels:
-                    lines = [f"הנה {len(reels)} טיוטות:\n"]
-                    for i, reel in enumerate(reels, 1):
-                        stage = reel.get("awareness_stage", "")
-                        ctype = reel.get("content_type", "")
-                        hook = reel.get("hook", "")
-                        tov = reel.get("text_on_video")
-                        caption = reel.get("caption", "")
-                        lines.append(f"📝 טיוטה {i} ({ctype} | {stage}):")
-                        lines.append(f"הוק: \"{hook}\"")
-                        if tov:
-                            lines.append(f"טקסט על הסרטון: \"{tov}\"")
-                        if caption:
-                            lines.append(f"קפשן: \"{caption[:100]}...\"")
-                        lines.append("")
-                    lines.append("מה דעתך? אפשר לאשר, לבקש שינויים בטיוטה ספציפית, או להתחיל מחדש")
-                    final_response = "\n".join(lines)
+            if reels:
+                # Save drafts to Supabase agent_drafts (not Airtable).
+                # Airtable save happens later via render_and_publish tool
+                # when the user approves the drafts.
+                # Skip if drafts already exist (write_reel with draft_index
+                # handles updates; we only create on the first pass).
+                draft_count = 0
+                try:
+                    existing_drafts = await session_store.get_drafts(session_id)
+                    if existing_drafts:
+                        logger.info(
+                            f"[Agent] {len(existing_drafts)} drafts already exist "
+                            f"for session {session_id}, skipping auto-save"
+                        )
+                        draft_count = len(existing_drafts)
+                    else:
+                        await session_store.save_drafts(session_id, [r for r in reels])
+                        draft_count = len(reels)
+                        logger.info(
+                            f"[Agent] Saved {draft_count} drafts to agent_drafts "
+                            f"for session {session_id}"
+                        )
+                except Exception as e:
+                    logger.error(f"[Agent] Failed to save drafts: {e}")
+
+                # Always format reels ourselves for consistent display
+                lines = [f"הנה {len(reels)} טיוטות:\n"]
+                for i, reel in enumerate(reels, 1):
+                    stage = reel.get("awareness_stage", "")
+                    ctype = reel.get("content_type", "")
+                    hook = reel.get("hook", "")
+                    tov = reel.get("text_on_video")
+                    caption = reel.get("caption", "")
+                    lines.append(f"📝 טיוטה {i} ({ctype} | {stage}):")
+                    lines.append(f"הוק: \"{hook}\"")
+                    if tov:
+                        lines.append(f"טקסט על הסרטון: \"{tov}\"")
+                    if caption:
+                        lines.append(f"קפשן: \"{caption[:100]}...\"")
+                    lines.append("")
+                if draft_count > 0:
+                    lines.append(f"✅ {draft_count} טיוטות נשמרו")
+                    lines.append("כשהטיוטות מוכנות, אגיד \"רנדרי\" כדי ליצור סרטונים ולפרסם בדף התוכן")
+                lines.append("מה דעתך? אפשר לבקש שינויים בטיוטה ספציפית, או להתחיל מחדש")
+                final_response = "\n".join(lines)
 
             if not final_response:
                 final_response = "סיימתי את המשימה."
@@ -226,7 +271,11 @@ async def run_agent(
             logger.info(f"[Agent] Calling tool: {tool_name}({tool_args})")
             tool_start = time.time()
 
-            result = await tool_registry.execute_tool(tool_name, tool_args)
+            result = await tool_registry.execute_tool(
+                tool_name, tool_args,
+                authorized_client_id=client_id,
+                user_id=user_id,
+            )
 
             tool_duration = int((time.time() - tool_start) * 1000)
             tool_call_record = ToolCall(

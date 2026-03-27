@@ -131,20 +131,67 @@ async def get_client(client_id: str) -> dict[str, Any]:
 
 
 async def get_magnets_for_client(client_id: str, client_name: str = "") -> list[dict[str, Any]]:
-    """Fetch all magnets linked to a client."""
-    if client_name:
-        safe = _escape_airtable_string(client_name)
-        formula = f"FIND('{safe}', ARRAYJOIN({{Client Name}}))"
-    else:
-        safe = _escape_airtable_string(client_id)
-        formula = f"FIND('{safe}', ARRAYJOIN({{Client}}))"
-    return await _fetch_all(config.TABLE_MAGNETS, formula=formula)
+    """Fetch all magnets linked to a client.
+
+    Strategy (ordered by reliability):
+    1. By email from cache → FIND(email, ARRAYJOIN({Client Email}))
+       Email is unique — no ambiguity. Requires Lookup field "Client Email"
+       in the Magnets table (pulls from Clients.email).
+    2. By name from cache → FIND(name, ARRAYJOIN({Client Name}))
+       Fallback if email field is empty or the Lookup field doesn't exist yet.
+    3. Return empty list with error log.
+
+    The client_name parameter from GLM is intentionally ignored — it's
+    often wrong (e.g. "Wendy" instead of "גאיה"). We only use verified
+    data from the cache, which is populated by get_client_profile().
+
+    NOTE: The old approach of FIND(record_id, ARRAYJOIN({Client})) never
+    worked because ARRAYJOIN on a linked-record field returns the display
+    value (e.g. "13"), not the record ID.
+    """
+    # Import here to avoid circular imports
+    from tool_registry import _client_cache
+
+    cached = _client_cache.get(client_id, {})
+    cached_email = cached.get("email", "")
+    cached_name = cached.get("name", "")
+
+    # Strategy 1: Search by email (unique, most reliable)
+    if cached_email:
+        safe_email = _escape_airtable_string(cached_email)
+        results = await _fetch_all(
+            config.TABLE_MAGNETS,
+            formula=f"FIND('{safe_email}', ARRAYJOIN({{Client Email}}))",
+        )
+        if results:
+            logger.info(f"Magnets: found {len(results)} via email '{cached_email}'")
+            return results
+        logger.warning(f"Magnets: email '{cached_email}' returned 0 results (Lookup field may not exist yet)")
+
+    # Strategy 2: Fallback to cached name (from Airtable, not from GLM)
+    if cached_name:
+        safe_name = _escape_airtable_string(cached_name)
+        results = await _fetch_all(
+            config.TABLE_MAGNETS,
+            formula=f"FIND('{safe_name}', ARRAYJOIN({{Client Name}}))",
+        )
+        if results:
+            logger.info(f"Magnets: found {len(results)} via cached name '{cached_name}'")
+            return results
+        logger.warning(f"Magnets: cached name '{cached_name}' returned 0 results")
+
+    # Both strategies failed
+    logger.error(
+        f"Magnets: no results for client_id={client_id}, "
+        f"email={cached_email!r}, name={cached_name!r}"
+    )
+    return []
 
 
 # ── Viral Hooks ───────────────────────────────────────────────────────────────
 
 
-async def get_viral_hooks(client_niche_ids: list[str], limit: int = 40) -> list[dict[str, Any]]:
+async def get_viral_hooks(client_niche_ids: list[str], limit: int = 20) -> list[dict[str, Any]]:
     """Fetch viral hooks filtered by niche record IDs.
 
     The Viral Hooks table uses a "Relevant Niches" linked-record field
@@ -348,7 +395,7 @@ def extract_brand_config(client_record: dict[str, Any]) -> BrandConfig:
     _FIELD_MAP = {
         "Brand Primary Color": "primary_color",
         "Brand Secondary Color": "secondary_color",
-        "Brand Font Family": "font_family",
+        "Font Name": "font_family",
         "Brand Hook Font Size": "hook_font_size",
         "Brand Body Font Size": "body_font_size",
         "Brand Overlay Color": "overlay_color",
@@ -396,7 +443,7 @@ async def update_content_queue_video_attachment(record_id: str, video_url: str) 
         resp = await client.patch(
             f"{BASE_URL}/{config.TABLE_CONTENT_QUEUE}/{record_id}",
             headers=HEADERS,
-            json={"fields": {"Final Video": [{"url": video_url}]}},
+            json={"fields": {"Final Video": [{"url": video_url}], "Status": "Done"}},
         )
         resp.raise_for_status()
         logger.info(f"Updated Content Queue {record_id} with video attachment")

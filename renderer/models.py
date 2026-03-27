@@ -1,11 +1,14 @@
 """Pydantic v2 data models for the renderer integration layer."""
 
+import logging
 import re
 from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+logger = logging.getLogger(__name__)
 
-ALLOWED_FONTS = {"Heebo", "Assistant", "Rubik", "Frank Ruhl Libre"}
+
+ALLOWED_FONTS = {"Heebo", "Assistant", "Rubik", "Frank Ruhl Libre", "Ploni", "ploni"}
 
 
 class TextSegment(BaseModel):
@@ -67,12 +70,13 @@ class BrandConfig(BaseModel):
     @field_validator("font_family", mode="before")
     @classmethod
     def validate_font_family(cls, v: Any) -> str:
-        """Validate font family against the curated allowed set."""
+        """Validate font family, falling back to Heebo if not installed."""
         if v not in ALLOWED_FONTS:
-            raise ValueError(
-                f"Font family '{v}' is not in the curated set. "
-                f"Allowed: {sorted(ALLOWED_FONTS)}"
+            logger.warning(
+                f"Font '{v}' not installed in Remotion "
+                f"(allowed: {sorted(ALLOWED_FONTS)}), falling back to Heebo"
             )
+            return "Heebo"
         return v
 
 
