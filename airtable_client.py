@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 
@@ -131,20 +132,67 @@ async def get_client(client_id: str) -> dict[str, Any]:
 
 
 async def get_magnets_for_client(client_id: str, client_name: str = "") -> list[dict[str, Any]]:
-    """Fetch all magnets linked to a client."""
-    if client_name:
-        safe = _escape_airtable_string(client_name)
-        formula = f"FIND('{safe}', ARRAYJOIN({{Client Name}}))"
-    else:
-        safe = _escape_airtable_string(client_id)
-        formula = f"FIND('{safe}', ARRAYJOIN({{Client}}))"
-    return await _fetch_all(config.TABLE_MAGNETS, formula=formula)
+    """Fetch all magnets linked to a client.
+
+    Strategy (ordered by reliability):
+    1. By email from cache → FIND(email, ARRAYJOIN({Client Email}))
+       Email is unique — no ambiguity. Requires Lookup field "Client Email"
+       in the Magnets table (pulls from Clients.email).
+    2. By name from cache → FIND(name, ARRAYJOIN({Client Name}))
+       Fallback if email field is empty or the Lookup field doesn't exist yet.
+    3. Return empty list with error log.
+
+    The client_name parameter from GLM is intentionally ignored — it's
+    often wrong (e.g. "Wendy" instead of "גאיה"). We only use verified
+    data from the cache, which is populated by get_client_profile().
+
+    NOTE: The old approach of FIND(record_id, ARRAYJOIN({Client})) never
+    worked because ARRAYJOIN on a linked-record field returns the display
+    value (e.g. "13"), not the record ID.
+    """
+    # Import here to avoid circular imports
+    from tool_registry import _client_cache
+
+    cached = _client_cache.get(client_id, {})
+    cached_email = cached.get("email", "")
+    cached_name = cached.get("name", "")
+
+    # Strategy 1: Search by email (unique, most reliable)
+    if cached_email:
+        safe_email = _escape_airtable_string(cached_email)
+        results = await _fetch_all(
+            config.TABLE_MAGNETS,
+            formula=f"FIND('{safe_email}', ARRAYJOIN({{Client Email}}))",
+        )
+        if results:
+            logger.info(f"Magnets: found {len(results)} via email '{cached_email}'")
+            return results
+        logger.warning(f"Magnets: email '{cached_email}' returned 0 results (Lookup field may not exist yet)")
+
+    # Strategy 2: Fallback to cached name (from Airtable, not from GLM)
+    if cached_name:
+        safe_name = _escape_airtable_string(cached_name)
+        results = await _fetch_all(
+            config.TABLE_MAGNETS,
+            formula=f"FIND('{safe_name}', ARRAYJOIN({{Client Name}}))",
+        )
+        if results:
+            logger.info(f"Magnets: found {len(results)} via cached name '{cached_name}'")
+            return results
+        logger.warning(f"Magnets: cached name '{cached_name}' returned 0 results")
+
+    # Both strategies failed
+    logger.error(
+        f"Magnets: no results for client_id={client_id}, "
+        f"email={cached_email!r}, name={cached_name!r}"
+    )
+    return []
 
 
 # ── Viral Hooks ───────────────────────────────────────────────────────────────
 
 
-async def get_viral_hooks(client_niche_ids: list[str], limit: int = 40) -> list[dict[str, Any]]:
+async def get_viral_hooks(client_niche_ids: list[str], limit: int = 20) -> list[dict[str, Any]]:
     """Fetch viral hooks filtered by niche record IDs.
 
     The Viral Hooks table uses a "Relevant Niches" linked-record field
@@ -379,25 +427,48 @@ def extract_brand_config(client_record: dict[str, Any]) -> BrandConfig:
         return BrandConfig()
 
 
-async def update_content_queue_video_attachment(record_id: str, video_url: str) -> dict[str, Any]:
+async def update_content_queue_video_attachment(
+    record_id: str,
+    video_url: str,
+    max_retries: int = 3,
+) -> dict[str, Any]:
     """Add rendered video URL as attachment on a Content Queue record.
 
     Airtable fetches the file from the URL and stores its own copy.
     The URL must be publicly accessible (no auth required).
+    Retries up to max_retries times with exponential backoff (Airtable
+    may be slow to fetch the video or rate-limit concurrent requests).
 
     Args:
         record_id: Airtable record ID (e.g. "recXXX").
         video_url: Public URL of the rendered video.
+        max_retries: Number of retry attempts (default 3).
 
     Returns:
         Updated Airtable record as a dict.
+
+    Raises:
+        Last exception after all retries are exhausted.
     """
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.patch(
-            f"{BASE_URL}/{config.TABLE_CONTENT_QUEUE}/{record_id}",
-            headers=HEADERS,
-            json={"fields": {"Final Video": [{"url": video_url}]}},
-        )
-        resp.raise_for_status()
-        logger.info(f"Updated Content Queue {record_id} with video attachment")
-        return resp.json()
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.patch(
+                    f"{BASE_URL}/{config.TABLE_CONTENT_QUEUE}/{record_id}",
+                    headers=HEADERS,
+                    json={"fields": {"Final Video": [{"url": video_url}]}},
+                )
+                resp.raise_for_status()
+                logger.info(f"Updated Content Queue {record_id} with video attachment")
+                return resp.json()
+        except Exception as e:
+            last_error = e
+            wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+            logger.warning(
+                f"Airtable attachment update attempt {attempt + 1}/{max_retries} "
+                f"failed for {record_id}: {e}. Retrying in {wait}s..."
+            )
+            await asyncio.sleep(wait)
+
+    raise last_error  # type: ignore[misc]

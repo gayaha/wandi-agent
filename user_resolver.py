@@ -201,6 +201,11 @@ async def _search_airtable_client_by_user_metadata(user_id: str) -> str | None:
 
     When Client Email is not set in Airtable, we try matching the user's
     display_name (set during Lovable registration) against Client Name.
+
+    ⚠️ This is a risky fallback — display_name can be generic (e.g. "Wendy")
+    and may match the wrong client. We request maxRecords=2 to detect
+    ambiguity: if 2+ records match, we refuse the match rather than
+    pick the wrong client.
     """
     try:
         client = _get_client()
@@ -215,19 +220,43 @@ async def _search_airtable_client_by_user_metadata(user_id: str) -> str | None:
         if not display_name:
             return None
 
-        logger.info(f"Trying name-based match: '{display_name}'")
+        # Also get the email for context in warning logs
+        user_email = user.email or "unknown"
+
+        logger.warning(
+            f"CLIENT LOOKUP FALLBACK: email-based search failed, falling back to "
+            f"display_name match. user_id={user_id}, email={user_email}, "
+            f"display_name='{display_name}'. This may match the wrong client."
+        )
+
         formula = f"{{Client Name}}='{_escape_airtable_string(display_name)}'"
         async with httpx.AsyncClient(timeout=30) as http:
             resp = await http.get(
                 f"{_AIRTABLE_BASE_URL}/{config.TABLE_CLIENTS}",
                 headers=_AIRTABLE_HEADERS,
-                params={"filterByFormula": formula, "maxRecords": 1},
+                params={"filterByFormula": formula, "maxRecords": 2},
             )
             resp.raise_for_status()
             records = resp.json().get("records", [])
+
+            if len(records) > 1:
+                # Ambiguous match — multiple clients share the same name
+                record_ids = [r["id"] for r in records]
+                logger.error(
+                    f"AMBIGUOUS CLIENT MATCH: display_name='{display_name}' "
+                    f"matched {len(records)} clients: {record_ids}. "
+                    f"Refusing to pick one. user_id={user_id}, email={user_email}. "
+                    f"Fix: set 'Client Email' in Airtable for this user."
+                )
+                return None
+
             if records:
                 record_id = records[0]["id"]
-                logger.info(f"Name-based match: '{display_name}' -> {record_id}")
+                logger.warning(
+                    f"Name-based match accepted (single result): "
+                    f"'{display_name}' -> {record_id}. "
+                    f"Consider setting 'Client Email' in Airtable to avoid this fallback."
+                )
                 return record_id
 
         return None

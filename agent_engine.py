@@ -53,10 +53,26 @@ async def get_or_create_session(
     """Get existing session or create a new one in Supabase.
 
     Returns a session dict with keys: id, user_id, client_id, title, status.
+
+    Security: when an existing session_id is provided, we verify that the
+    session's user_id matches the authenticated user. This prevents
+    user A from accessing user B's session by guessing/sending a session_id.
+
+    Raises:
+        PermissionError: If the session belongs to a different user.
     """
     if session_id:
         existing = await session_store.get_session(session_id)
         if existing:
+            if existing.get("user_id") != user_id:
+                logger.warning(
+                    f"Session ownership mismatch: session {session_id} "
+                    f"belongs to {existing.get('user_id')}, "
+                    f"but user {user_id} tried to access it"
+                )
+                raise PermissionError(
+                    "Session not found or access denied"
+                )
             return existing
 
     # Create new session
@@ -94,6 +110,9 @@ async def run_agent(
         system_prompt: Optional custom system prompt override.
     """
     session_id = session["id"]
+
+    # Clear client cache at the start of each agent run to ensure fresh data
+    tool_registry.clear_client_cache()
 
     # Use the agent system prompt from prompts.py, with client context injected
     if system_prompt is None:
@@ -151,44 +170,72 @@ async def run_agent(
             total_ms = int((time.time() - start_time) * 1000)
             final_response = content or ""
 
-            # If LLM gave empty/generic response but we have reel results,
-            # format them ourselves instead of showing "סיימתי את המשימה"
-            if (not final_response or "סיימתי" in final_response) and all_tool_calls:
-                # Collect all reels from write_reel calls
-                reels = []
-                for tc in all_tool_calls:
-                    if tc.tool_name == "write_reel" and isinstance(tc.result, dict):
-                        reel = tc.result.get("result", {}).get("reel")
-                        if reel:
-                            reels.append(reel)
+            # Always collect reels from write_reel calls (regardless of LLM response)
+            reels = []
+            for tc in all_tool_calls:
+                if tc.tool_name == "write_reel" and isinstance(tc.result, dict):
+                    reel = tc.result.get("result", {}).get("reel")
+                    if reel:
+                        reels.append(reel)
 
-                # Also check for draft_content results (backward compat)
-                if not reels:
-                    draft_tc = next(
-                        (tc for tc in all_tool_calls if tc.tool_name == "draft_content"),
-                        None,
-                    )
-                    if draft_tc and isinstance(draft_tc.result, dict):
-                        for d in draft_tc.result.get("result", {}).get("drafts", []):
-                            reels.append(d)
+            # Also check for draft_content results (backward compat)
+            if not reels:
+                draft_tc = next(
+                    (tc for tc in all_tool_calls if tc.tool_name == "draft_content"),
+                    None,
+                )
+                if draft_tc and isinstance(draft_tc.result, dict):
+                    for d in draft_tc.result.get("result", {}).get("drafts", []):
+                        reels.append(d)
 
-                if reels:
-                    lines = [f"הנה {len(reels)} טיוטות:\n"]
-                    for i, reel in enumerate(reels, 1):
-                        stage = reel.get("awareness_stage", "")
-                        ctype = reel.get("content_type", "")
-                        hook = reel.get("hook", "")
-                        tov = reel.get("text_on_video")
-                        caption = reel.get("caption", "")
-                        lines.append(f"📝 טיוטה {i} ({ctype} | {stage}):")
-                        lines.append(f"הוק: \"{hook}\"")
-                        if tov:
-                            lines.append(f"טקסט על הסרטון: \"{tov}\"")
-                        if caption:
-                            lines.append(f"קפשן: \"{caption[:100]}...\"")
-                        lines.append("")
-                    lines.append("מה דעתך? אפשר לאשר, לבקש שינויים בטיוטה ספציפית, או להתחיל מחדש")
-                    final_response = "\n".join(lines)
+            if reels:
+                # Auto-save reels to Airtable Content Queue
+                # Uses batch first, falls back to individual saves on error
+                # (e.g. one bad magnet_id can cause a 422 that kills the whole batch)
+                saved_count = 0
+                try:
+                    import agent as agent_module
+                    import airtable_client as at
+                    queue_records = [agent_module._build_queue_record(r, client_id) for r in reels]
+                    try:
+                        saved = await at.save_reels_to_queue(queue_records)
+                        saved_count = len(saved)
+                    except Exception as batch_err:
+                        logger.warning(
+                            f"[Agent] Batch save failed ({batch_err}), "
+                            f"falling back to individual saves"
+                        )
+                        for i, rec in enumerate(queue_records):
+                            try:
+                                result_records = await at.save_reels_to_queue([rec])
+                                saved_count += len(result_records)
+                            except Exception as single_err:
+                                logger.error(
+                                    f"[Agent] Failed to save reel {i + 1}: {single_err}"
+                                )
+                    logger.info(f"[Agent] Auto-saved {saved_count}/{len(reels)} reels to Airtable")
+                except Exception as e:
+                    logger.error(f"[Agent] Failed to auto-save reels to Airtable: {e}")
+
+                # Always format reels ourselves for consistent display
+                lines = [f"הנה {len(reels)} טיוטות:\n"]
+                for i, reel in enumerate(reels, 1):
+                    stage = reel.get("awareness_stage", "")
+                    ctype = reel.get("content_type", "")
+                    hook = reel.get("hook", "")
+                    tov = reel.get("text_on_video")
+                    caption = reel.get("caption", "")
+                    lines.append(f"📝 טיוטה {i} ({ctype} | {stage}):")
+                    lines.append(f"הוק: \"{hook}\"")
+                    if tov:
+                        lines.append(f"טקסט על הסרטון: \"{tov}\"")
+                    if caption:
+                        lines.append(f"קפשן: \"{caption[:100]}...\"")
+                    lines.append("")
+                if saved_count > 0:
+                    lines.append(f"✅ {saved_count} טיוטות נשמרו ב-Content Queue")
+                lines.append("מה דעתך? אפשר לבקש שינויים בטיוטה ספציפית, או להתחיל מחדש")
+                final_response = "\n".join(lines)
 
             if not final_response:
                 final_response = "סיימתי את המשימה."
@@ -226,7 +273,10 @@ async def run_agent(
             logger.info(f"[Agent] Calling tool: {tool_name}({tool_args})")
             tool_start = time.time()
 
-            result = await tool_registry.execute_tool(tool_name, tool_args)
+            result = await tool_registry.execute_tool(
+                tool_name, tool_args,
+                authorized_client_id=client_id,
+            )
 
             tool_duration = int((time.time() - tool_start) * 1000)
             tool_call_record = ToolCall(

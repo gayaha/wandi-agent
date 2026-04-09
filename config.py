@@ -33,6 +33,11 @@ SUPABASE_RAW_MEDIA_BUCKET = os.getenv("SUPABASE_RAW_MEDIA_BUCKET", "raw-media")
 # Remotion renderer service
 REMOTION_SERVICE_URL = os.getenv("REMOTION_SERVICE_URL", "http://localhost:3000")
 
+# Alerts (Resend email)
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")
+ALERT_EMAIL_FROM = os.getenv("ALERT_EMAIL_FROM", "Wandi Alerts <alerts@wandi.app>")
+
 # Server
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))

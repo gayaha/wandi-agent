@@ -4,11 +4,14 @@ Tracks daily message and generation limits per user plan.
 Table: user_quotas(id UUID, user_id UUID, period_start DATE,
                    messages_used INT, generations_used INT, plan TEXT)
 
-Fail-open: if Supabase is unreachable, users are never blocked.
+Fail-open policy: if Supabase is completely unreachable after both
+SELECT + UPSERT attempts, we allow the request but log an ERROR
+with full context for monitoring.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -64,16 +67,31 @@ def _limits_for_plan(plan: str) -> dict[str, int]:
     return PLAN_LIMITS.get(plan, PLAN_LIMITS[DEFAULT_PLAN])
 
 
-def _fail_open_status() -> QuotaStatus:
-    """Default status when Supabase is unreachable -- allow the request."""
-    limits = _limits_for_plan(DEFAULT_PLAN)
+FAIL_OPEN_LIMITS = {"messages_per_day": 5, "generations_per_day": 3}
+
+
+def _fail_open_status(user_id: str = "unknown", reason: str = "") -> QuotaStatus:
+    """Last-resort fallback when Supabase is completely unreachable.
+
+    Allows the request to avoid blocking paying users during outages,
+    but with a severely reduced cap (5 messages, 3 generations) so that
+    abuse is limited even without real quota tracking.
+    Logs at ERROR level so we can monitor and investigate.
+    """
+    logger.error(
+        f"QUOTA FAIL-OPEN: user_id={user_id}, reason={reason}. "
+        f"Request allowed with reduced limits "
+        f"(msgs={FAIL_OPEN_LIMITS['messages_per_day']}, "
+        f"gens={FAIL_OPEN_LIMITS['generations_per_day']}). "
+        f"If this recurs, check Supabase connectivity and user_quotas table."
+    )
     return QuotaStatus(
         allowed=True,
         plan=DEFAULT_PLAN,
         messages_used=0,
-        messages_limit=limits["messages_per_day"],
+        messages_limit=FAIL_OPEN_LIMITS["messages_per_day"],
         generations_used=0,
-        generations_limit=limits["generations_per_day"],
+        generations_limit=FAIL_OPEN_LIMITS["generations_per_day"],
         reset_time=_next_reset_iso(),
     )
 
@@ -101,8 +119,12 @@ def _ensure_today_row(client: Client, user_id: str) -> dict:
     """Return the quota row for today, creating one via upsert if needed.
 
     Uses ON CONFLICT (user_id, period_start) so concurrent calls are safe.
+
+    Raises:
+        RuntimeError: If both SELECT and UPSERT fail (Supabase unreachable).
     """
     today = _today_utc().isoformat()
+    fetch_error = None
 
     # Try fetching first (fast path -- avoids upsert overhead on every call)
     try:
@@ -117,9 +139,10 @@ def _ensure_today_row(client: Client, user_id: str) -> dict:
         if resp and resp.data:
             return resp.data
     except Exception as e:
-        logger.debug(f"Quota fetch failed (will upsert): {e}")
+        fetch_error = e
+        logger.warning(f"Quota fetch failed for user {user_id} (will try upsert): {e}")
 
-    # Row doesn't exist yet -- upsert with zeros
+    # Row doesn't exist yet (or fetch failed) -- upsert with zeros
     row = {
         "user_id": user_id,
         "period_start": today,
@@ -133,10 +156,26 @@ def _ensure_today_row(client: Client, user_id: str) -> dict:
             .upsert(row, on_conflict="user_id,period_start")
             .execute()
         )
-        return resp.data[0] if resp and resp.data else row
+        if resp and resp.data:
+            logger.info(
+                f"Created quota row for user {user_id} (date={today})"
+            )
+            return resp.data[0]
+        # Upsert returned empty data — log and raise so caller handles it
+        raise RuntimeError(
+            f"Upsert returned empty data for user {user_id}"
+        )
+    except RuntimeError:
+        raise  # Re-raise our own error
     except Exception as e:
-        logger.warning(f"Quota upsert failed: {e}")
-        return row
+        logger.error(
+            f"Quota upsert ALSO failed for user {user_id}: {e}. "
+            f"Original fetch error: {fetch_error}"
+        )
+        raise RuntimeError(
+            f"Both quota fetch and upsert failed for user {user_id}: "
+            f"fetch={fetch_error}, upsert={e}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -148,21 +187,23 @@ async def check_quota(user_id: str) -> QuotaStatus:
 
     If no quota record exists for today, create one (UPSERT).
     Returns QuotaStatus with allowed=True/False.
-    """
-    try:
-        client = _get_client()
-        row = _ensure_today_row(client, user_id)
 
+    Retry policy: if Supabase fails on the first attempt, we wait 1 second
+    and retry once. Only if the retry also fails do we fall back to a
+    reduced-limit fail-open status (5 messages, 3 generations).
+    """
+    client = _get_client()
+
+    # --- attempt helper (shared by first try + retry) ---
+    def _build_status(row: dict) -> QuotaStatus:
         plan = row.get("plan") or DEFAULT_PLAN
         limits = _limits_for_plan(plan)
         messages_used = row.get("messages_used", 0)
         generations_used = row.get("generations_used", 0)
-
         allowed = (
             messages_used < limits["messages_per_day"]
             and generations_used < limits["generations_per_day"]
         )
-
         return QuotaStatus(
             allowed=allowed,
             plan=plan,
@@ -172,9 +213,29 @@ async def check_quota(user_id: str) -> QuotaStatus:
             generations_limit=limits["generations_per_day"],
             reset_time=_next_reset_iso(),
         )
-    except Exception as exc:
-        logger.error(f"Quota check failed for {user_id}, defaulting to allow: {exc}")
-        return _fail_open_status()
+
+    # --- first attempt ---
+    try:
+        row = _ensure_today_row(client, user_id)
+        return _build_status(row)
+    except (RuntimeError, Exception) as first_err:
+        logger.warning(
+            f"Quota check attempt 1 failed for {user_id}: {first_err}. "
+            f"Retrying in 1s..."
+        )
+
+    # --- retry after 1 second ---
+    await asyncio.sleep(1)
+    try:
+        row = _ensure_today_row(client, user_id)
+        logger.info(f"Quota check retry succeeded for {user_id}")
+        return _build_status(row)
+    except (RuntimeError, Exception) as retry_err:
+        # Both attempts failed — fall back to reduced limits
+        return _fail_open_status(
+            user_id=user_id,
+            reason=f"2 attempts failed: first={first_err}, retry={retry_err}",
+        )
 
 
 async def consume_message(user_id: str) -> None:
@@ -184,7 +245,10 @@ async def consume_message(user_id: str) -> None:
         row = _ensure_today_row(client, user_id)
         row_id = row.get("id")
         if not row_id:
-            logger.warning(f"No quota row ID for {user_id}, skipping consume")
+            logger.error(
+                f"Quota row for {user_id} has no 'id' — cannot update count. "
+                f"Row contents: {row}"
+            )
             return
         new_count = row.get("messages_used", 0) + 1
         (
@@ -205,7 +269,10 @@ async def consume_generation(user_id: str, count: int = 1) -> None:
         row = _ensure_today_row(client, user_id)
         row_id = row.get("id")
         if not row_id:
-            logger.warning(f"No quota row ID for {user_id}, skipping generation consume")
+            logger.error(
+                f"Quota row for {user_id} has no 'id' — cannot update generation count. "
+                f"Row contents: {row}"
+            )
             return
         new_count = row.get("generations_used", 0) + count
         (
