@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any
 
@@ -426,25 +427,48 @@ def extract_brand_config(client_record: dict[str, Any]) -> BrandConfig:
         return BrandConfig()
 
 
-async def update_content_queue_video_attachment(record_id: str, video_url: str) -> dict[str, Any]:
+async def update_content_queue_video_attachment(
+    record_id: str,
+    video_url: str,
+    max_retries: int = 3,
+) -> dict[str, Any]:
     """Add rendered video URL as attachment on a Content Queue record.
 
     Airtable fetches the file from the URL and stores its own copy.
     The URL must be publicly accessible (no auth required).
+    Retries up to max_retries times with exponential backoff (Airtable
+    may be slow to fetch the video or rate-limit concurrent requests).
 
     Args:
         record_id: Airtable record ID (e.g. "recXXX").
         video_url: Public URL of the rendered video.
+        max_retries: Number of retry attempts (default 3).
 
     Returns:
         Updated Airtable record as a dict.
+
+    Raises:
+        Last exception after all retries are exhausted.
     """
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.patch(
-            f"{BASE_URL}/{config.TABLE_CONTENT_QUEUE}/{record_id}",
-            headers=HEADERS,
-            json={"fields": {"Final Video": [{"url": video_url}]}},
-        )
-        resp.raise_for_status()
-        logger.info(f"Updated Content Queue {record_id} with video attachment")
-        return resp.json()
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.patch(
+                    f"{BASE_URL}/{config.TABLE_CONTENT_QUEUE}/{record_id}",
+                    headers=HEADERS,
+                    json={"fields": {"Final Video": [{"url": video_url}]}},
+                )
+                resp.raise_for_status()
+                logger.info(f"Updated Content Queue {record_id} with video attachment")
+                return resp.json()
+        except Exception as e:
+            last_error = e
+            wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+            logger.warning(
+                f"Airtable attachment update attempt {attempt + 1}/{max_retries} "
+                f"failed for {record_id}: {e}. Retrying in {wait}s..."
+            )
+            await asyncio.sleep(wait)
+
+    raise last_error  # type: ignore[misc]

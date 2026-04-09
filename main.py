@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 import agent
 import airtable_client as at
+import alerts
 import config
 import ollama_client as ollama
 import quota as quota_module
@@ -329,24 +330,42 @@ async def _run_generation_and_callback(request: GenerateAsyncRequest):
                     except OSError:
                         pass
 
-                    # Mark as rendered once video is in Supabase (before Airtable update)
-                    project["source_video_url"] = video_url
+                    # Mark as rendered — keep source_video_url as original source,
+                    # add processed_video_url for the rendered output.
+                    project["processed_video_url"] = video_url
                     project["status"] = "draft"
                     logger.info(f"[async] Rendered reel {idx}: {video_url}")
 
-                    # Airtable attachment update — separate try-except so a failure
-                    # here does not mark the entire render as failed.
+                    # Airtable attachment update (retries internally)
                     try:
                         await at.update_content_queue_video_attachment(record_id, video_url)
                     except Exception as e:
                         logger.error(
-                            f"[async] Airtable attachment update failed for reel {idx}: {e}"
+                            f"[async] Airtable attachment update failed for reel {idx} "
+                            f"after retries: {e}. Video URL: {video_url}"
+                        )
+                        await alerts.send_airtable_failure_alert(
+                            record_id=record_id,
+                            video_url=video_url,
+                            error=str(e),
+                            context={
+                                "client_name": project.get("client_name", "unknown"),
+                                "batch_id": batch_id,
+                            },
                         )
 
                 except Exception as e:
                     logger.error(f"[async] Render failed for reel {idx}: {e}")
                     project["render_error"] = str(e)
                     project["status"] = "draft"
+                    await alerts.send_render_failure_alert(
+                        record_id=record_id,
+                        error=str(e),
+                        context={
+                            "client_name": project.get("client_name", "unknown"),
+                            "batch_id": batch_id,
+                        },
+                    )
 
             await asyncio.gather(
                 *[_render_one(i, p) for i, p in enumerate(projects)]
@@ -498,14 +517,46 @@ async def _run_render(job_id: str, request: RenderRequest):
         _render_jobs[job_id]["status"] = "completed"
         _render_jobs[job_id]["progress"] = 1.0
         _render_jobs[job_id]["video_url"] = video_url
+        _render_jobs[job_id]["processed_video_url"] = video_url
         logger.info(f"Render job {job_id} completed: {video_url}")
 
-        # Airtable attachment update — separate try-except so a failure
-        # here does not mark the entire render as failed.
+        # Airtable attachment update (retries internally)
+        airtable_ok = True
         try:
             await at.update_content_queue_video_attachment(request.record_id, video_url)
         except Exception as e:
-            logger.error(f"Airtable attachment update failed for job {job_id}: {e}")
+            airtable_ok = False
+            logger.error(
+                f"Airtable attachment update failed for job {job_id} after retries: {e}. "
+                f"Video URL: {video_url}"
+            )
+
+        # Update content_projects.processed_video_url directly so publish works
+        # even if the frontend misses the callback.
+        cp_id = supabase_client.find_content_project_id_by_airtable(request.record_id)
+        if cp_id:
+            try:
+                supabase_client.update_content_project(cp_id, {
+                    "processed_video_url": video_url,
+                    "status": "ready",
+                })
+                logger.info(f"Updated content_project {cp_id} with processed_video_url")
+            except Exception as e:
+                logger.error(f"content_projects update failed for job {job_id}: {e}")
+        else:
+            logger.warning(
+                f"No content_project found for record {request.record_id}. "
+                f"processed_video_url NOT saved to DB. Video URL: {video_url}"
+            )
+
+        # Send alert if Airtable or content_projects update failed
+        if not airtable_ok or not cp_id:
+            await alerts.send_airtable_failure_alert(
+                record_id=request.record_id,
+                video_url=video_url,
+                error="Airtable update failed" if not airtable_ok else "content_project not found",
+                context={"client_name": request.client_id or "unknown"},
+            )
 
         # Notify callback if provided
         if request.callback_url:
@@ -515,6 +566,14 @@ async def _run_render(job_id: str, request: RenderRequest):
         logger.exception(f"Render job {job_id} failed: {e}")
         _render_jobs[job_id]["status"] = "failed"
         _render_jobs[job_id]["error"] = str(e)
+
+        # Alert on complete render failure
+        await alerts.send_render_failure_alert(
+            record_id=request.record_id,
+            error=str(e),
+            context={"client_name": request.client_id or "unknown"},
+        )
+
         if request.callback_url:
             try:
                 await _send_render_callback(request.callback_url, _render_jobs[job_id])
